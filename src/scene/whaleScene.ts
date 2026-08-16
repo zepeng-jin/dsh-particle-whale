@@ -239,8 +239,8 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
   const invMatrix = new THREE.Matrix4()
   const localMouse = new THREE.Vector3()
 
-  // 3D 深度深海动力学控制器初始点
-  const initialWorldPos = getScreenWorldPos(camera, 120, window.innerHeight - 100)
+  // 3D 深度深海动力学控制器初始点 (距离底部 175px，优雅悬浮在左下方安全区)
+  const initialWorldPos = getScreenWorldPos(camera, 130, window.innerHeight - 175)
   const swimAgent = {
     pos: initialWorldPos.clone(),
     yaw: Math.PI,
@@ -305,8 +305,8 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.18x（极致袖珍灵宠）
-    const baseScale = 1.00 * currentHeroProgress + 0.18 * (1.0 - currentHeroProgress)
+    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.22x（精致灵动灵宠）
+    const baseScale = 1.00 * currentHeroProgress + 0.22 * (1.0 - currentHeroProgress)
     const currentScaleFactor = baseScale * currentConfig.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
@@ -340,28 +340,27 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       swimAgent.roll += (0.0 - swimAgent.roll) * 0.08
 
     } else {
-      // =====【对话窗口 (Chat) 状态】：严格反投影至屏幕真实「左下角」=====
-      // 探测当前侧边栏真实宽度（收起时 ~56px，展开时 ~240px）
+      // =====【对话窗口 (Chat) 状态】：左下方舒适水域 (高度适中，不沉底) =====
       const sidebarEl = document.querySelector('aside, [class*="SidebarRoot_root"], [class*="sidebar"]')
       const sidebarRight = sidebarEl ? sidebarEl.getBoundingClientRect().right : 56
 
-      // 目标像素点：紧邻侧栏右侧 70px，底部往上 95px（处于输入栏左侧安全空白水域）
-      const targetPixelX = sidebarRight + 70
-      const targetPixelY = window.innerHeight - 95
+      // 目标像素点：距离侧栏右侧 85px，距离屏幕物理底部 175px（舒适悬浮在左下方，不被底部或输入框卡片遮挡）
+      const targetPixelX = sidebarRight + 85
+      const targetPixelY = window.innerHeight - 175
       const baseCornerWorld = getScreenWorldPos(camera, targetPixelX, targetPixelY, 0)
 
       const cornerT = elapsed * 0.70 * userSpeedMult
-      const blTargetX = baseCornerWorld.x + Math.sin(cornerT) * 0.25
-      const blTargetY = baseCornerWorld.y + Math.sin(cornerT * 2.0) * 0.12
-      const blTargetZ = Math.cos(cornerT) * 0.10
+      const blTargetX = baseCornerWorld.x + Math.sin(cornerT) * 0.28
+      const blTargetY = baseCornerWorld.y + Math.sin(cornerT * 2.0) * 0.14
+      const blTargetZ = Math.cos(cornerT) * 0.12
 
       const easeFactor = 0.08 * (1.0 - currentHeroProgress)
       swimAgent.pos.x += (blTargetX - swimAgent.pos.x) * easeFactor
       swimAgent.pos.y += (blTargetY - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (blTargetZ - swimAgent.pos.z) * easeFactor
 
-      const blVx = Math.cos(cornerT) * 0.25 * 0.70
-      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.12 * 0.70
+      const blVx = Math.cos(cornerT) * 0.28 * 0.70
+      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.14 * 0.70
       const targetYawCorner = Math.atan2(blVy, blVx)
 
       swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
