@@ -476,7 +476,7 @@ function checkIsHeroScreen(): boolean {
     return false
   }
 
-  // 2. 检查输入框 placeholder（对话状态下为“给智能体发消息”）
+  // 2. 检查输入框 placeholder
   const textareas = document.querySelectorAll('textarea')
   for (let i = 0; i < textareas.length; i++) {
     const ph = textareas[i]?.getAttribute('placeholder') || ''
@@ -485,12 +485,11 @@ function checkIsHeroScreen(): boolean {
     }
   }
 
-  // 3. 检查是否有对话消息节点、代码块、复制按钮或任务卡片
+  // 3. 检查是否有对话消息节点、代码块、复制按钮或会话流
   const hasChatElements = document.querySelector(
     'pre, code, div[class*="Turn_root"], [data-turn-id], div[class*="viewArea"], div[class*="ChatList"], div[class*="chat_"], div[class*="Message"]'
   )
   if (hasChatElements !== null) {
-    // 如果有对话内容，且没有明确的 data-phase="hero"，说明处于对话窗口
     if (!document.querySelector('[data-phase="hero"]')) {
       return false
     }
@@ -507,7 +506,6 @@ function checkIsHeroScreen(): boolean {
     return true
   }
 
-  // 默认：如果有滚动记录或历史内容则为对话模式
   return false
 }
 
@@ -1058,7 +1056,7 @@ function startWhaleAnimation(): () => void {
 
   // 3D 深度深海动力学控制器
   const swimAgent = {
-    pos: new THREE.Vector3(-5.8, -2.8, 0.0),
+    pos: new THREE.Vector3(-7.2, -3.7, 0.0),
     yaw: Math.PI,
     pitch: 0,
     roll: 0,
@@ -1127,8 +1125,8 @@ function startWhaleAnimation(): () => void {
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.26x（小巧伴随）
-    const baseScale = 1.00 * currentHeroProgress + 0.26 * (1.0 - currentHeroProgress)
+    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.20x（更加精致袖珍的小灵宠）
+    const baseScale = 1.00 * currentHeroProgress + 0.20 * (1.0 - currentHeroProgress)
     const currentScaleFactor = baseScale * currentConfig.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
@@ -1162,20 +1160,20 @@ function startWhaleAnimation(): () => void {
       swimAgent.roll += (0.0 - swimAgent.roll) * 0.08
 
     } else {
-      // =====【对话窗口 (Chat) 状态】：缩小，游至「左下角」优雅伴随 =====
-      const cornerT = elapsed * 0.75 * userSpeedMult
-      // 左下角专属水域 (X: -6.4 ~ -5.2, Y: -3.2 ~ -2.4)
-      const blTargetX = -5.8 + Math.sin(cornerT) * 0.55
-      const blTargetY = -2.8 + Math.sin(cornerT * 2.0) * 0.22
-      const blTargetZ = Math.cos(cornerT) * 0.18
+      // =====【对话窗口 (Chat) 状态】：极深左下角 (True Extreme Bottom-Left Corner) =====
+      // 深度定位于屏幕最左下区域 (X: -7.5 ~ -6.9, Y: -3.9 ~ -3.5)，绝不触碰任何聊天文字与卡片
+      const cornerT = elapsed * 0.70 * userSpeedMult
+      const blTargetX = -7.2 + Math.sin(cornerT) * 0.30
+      const blTargetY = -3.7 + Math.sin(cornerT * 2.0) * 0.15
+      const blTargetZ = Math.cos(cornerT) * 0.12
 
       const easeFactor = 0.08 * (1.0 - currentHeroProgress)
       swimAgent.pos.x += (blTargetX - swimAgent.pos.x) * easeFactor
       swimAgent.pos.y += (blTargetY - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (blTargetZ - swimAgent.pos.z) * easeFactor
 
-      const blVx = Math.cos(cornerT) * 0.55 * 0.75
-      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.22 * 0.75
+      const blVx = Math.cos(cornerT) * 0.30 * 0.70
+      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.15 * 0.70
       const targetYawCorner = Math.atan2(blVy, blVx)
 
       swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
