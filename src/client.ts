@@ -172,6 +172,110 @@ function generateVolumetricWhaleData(gridSize: number): WhaleVolumetricData {
   }
 }
 
+/** 浩瀚星河背景粒子数据生成 (Cosmic Starfield & Galaxy Stream) */
+function generateGalaxyData(count: number = 800) {
+  const positions = new Float32Array(count * 3)
+  const colors = new Float32Array(count * 3)
+  const sizes = new Float32Array(count)
+  const twinkles = new Float32Array(count * 2)
+
+  const galaxyColorA = new THREE.Color(0x38bdf8) // 璀璨浅天蓝
+  const galaxyColorB = new THREE.Color(0x818cf8) // 梦幻星系紫
+  const galaxyColorC = new THREE.Color(0xe0f2fe) // 纯净星芒白
+  const tmpCol = new THREE.Color()
+
+  for (let i = 0; i < count; i++) {
+    const isRibbon = Math.random() < 0.65
+    let x = 0
+    let y = 0
+    let z = 0
+
+    if (isRibbon) {
+      const t = (Math.random() - 0.5) * 28.0
+      const spreadY = (Math.random() - 0.5) * 6.0
+      x = t
+      y = -t * 0.35 + spreadY
+      z = (Math.random() - 0.5) * 12.0 - 2.0
+    } else {
+      x = (Math.random() - 0.5) * 32.0
+      y = (Math.random() - 0.5) * 20.0
+      z = (Math.random() - 0.5) * 14.0 - 4.0
+    }
+
+    positions[i * 3] = x
+    positions[i * 3 + 1] = y
+    positions[i * 3 + 2] = z
+
+    const randC = Math.random()
+    if (randC < 0.45) {
+      tmpCol.copy(galaxyColorA)
+    } else if (randC < 0.8) {
+      tmpCol.copy(galaxyColorB)
+    } else {
+      tmpCol.copy(galaxyColorC)
+    }
+
+    colors[i * 3] = tmpCol.r
+    colors[i * 3 + 1] = tmpCol.g
+    colors[i * 3 + 2] = tmpCol.b
+
+    sizes[i] = 1.2 + Math.random() * 2.8
+    twinkles[i * 2] = 0.5 + Math.random() * 2.0
+    twinkles[i * 2 + 1] = Math.random() * Math.PI * 2
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3))
+  geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1))
+  geometry.setAttribute('aTwinkle', new THREE.BufferAttribute(twinkles, 2))
+
+  return geometry
+}
+
+/** 星河顶点着色器 */
+const GALAXY_VERTEX_SHADER = `
+  attribute vec3 aColor;
+  attribute float aSize;
+  attribute vec2 aTwinkle;
+
+  uniform float uTime;
+  uniform float uOpacity;
+
+  varying vec3 vColor;
+  varying float vAlpha;
+
+  void main() {
+    vec3 pos = position;
+    pos.x += sin(uTime * 0.04 + pos.y * 0.15) * 0.25;
+    pos.y += cos(uTime * 0.03 + pos.x * 0.12) * 0.20;
+
+    vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * mvPos;
+
+    float dist = length(mvPos.xyz);
+    float twinkle = sin(uTime * aTwinkle.x + aTwinkle.y) * 0.5 + 0.5;
+    gl_PointSize = aSize * (35.0 / max(dist, 1.0)) * (0.65 + 0.55 * twinkle);
+
+    vColor = aColor;
+    vAlpha = uOpacity * (0.35 + 0.65 * twinkle);
+  }
+`
+
+/** 星河片元着色器 */
+const GALAXY_FRAGMENT_SHADER = `
+  varying vec3 vColor;
+  varying float vAlpha;
+
+  void main() {
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    float dist = length(coord);
+    if (dist > 0.5) discard;
+    float glow = smoothstep(0.5, 0.0, dist);
+    gl_FragColor = vec4(vColor, vAlpha * glow);
+  }
+`
+
 /** 顶点着色器 */
 const VERTEX_SHADER = `
   attribute float aOpacity;
@@ -323,7 +427,8 @@ interface UserWhaleConfig {
   brightness: number      // 0.2 ~ 1.8, 默认 1.0
   inputOpacity: number    // 0.2 ~ 1.0, 默认 0.88
   speed: number           // 0.5 ~ 2.0, 默认 1.0
-  scale: number           // 0.4 ~ 1.8, 默认 1.0 (体型缩放)
+  scale: number           // 0.4 ~ 1.8, 默认 1.0
+  galaxy: boolean         // 是否开启星河背景
 }
 
 const DEFAULT_CONFIG: UserWhaleConfig = {
@@ -331,7 +436,8 @@ const DEFAULT_CONFIG: UserWhaleConfig = {
   brightness: 1.0,
   inputOpacity: 0.88,
   speed: 1.0,
-  scale: 1.0
+  scale: 1.0,
+  galaxy: true
 }
 
 function loadConfig(): UserWhaleConfig {
@@ -359,25 +465,50 @@ function checkIsDarkTheme(): boolean {
   return document.body.hasAttribute('data-ds-dark-theme')
 }
 
-/** 检测当前是否为主界面 (Hero / Landing / 无对话空白页) */
+/** 
+ * 严格准确判断当前是否为「主界面 (Hero / 空白新会话)」还是「对话消息窗口 (Active Chat)」
+ */
 function checkIsHeroScreen(): boolean {
   if (typeof document === 'undefined') return true
-  
-  const hasMessages = document.querySelector(
-    'div[class*="Turn_root"], [data-node-id], div[class*="TurnStatus"], div[class*="ChatList"]'
-  )
-  if (hasMessages !== null) {
+
+  // 1. 明确标记：DSH 活跃对话阶段必定携带 data-phase="active"
+  if (document.querySelector('[data-phase="active"]')) {
     return false
   }
 
-  const isHeroPhase = document.querySelector(
-    '[data-phase="hero"], div[class*="heroWorkspaceRow"], div[class*="EmptyHero"], div[class*="composerHero"], div[class*="Hero"]'
+  // 2. 检查输入框 placeholder（对话状态下为“给智能体发消息”）
+  const textareas = document.querySelectorAll('textarea')
+  for (let i = 0; i < textareas.length; i++) {
+    const ph = textareas[i]?.getAttribute('placeholder') || ''
+    if (ph.includes('给智能体发消息') || ph.includes('Send a message') || ph.includes('智能体')) {
+      return false
+    }
+  }
+
+  // 3. 检查是否有对话消息节点、代码块、复制按钮或任务卡片
+  const hasChatElements = document.querySelector(
+    'pre, code, div[class*="Turn_root"], [data-turn-id], div[class*="viewArea"], div[class*="ChatList"], div[class*="chat_"], div[class*="Message"]'
   )
-  if (isHeroPhase !== null) {
+  if (hasChatElements !== null) {
+    // 如果有对话内容，且没有明确的 data-phase="hero"，说明处于对话窗口
+    if (!document.querySelector('[data-phase="hero"]')) {
+      return false
+    }
+  }
+
+  // 4. 明确的 Hero 标记
+  if (document.querySelector('[data-phase="hero"], [class*="composerHero"], [class*="heroWorkspaceRow"]')) {
     return true
   }
 
-  return true
+  // 5. 检查页面中是否有主页标语
+  const h1 = document.querySelector('h1')
+  if (h1 && (h1.textContent?.includes('探索未至之境') || h1.textContent?.includes('Into the Unknown'))) {
+    return true
+  }
+
+  // 默认：如果有滚动记录或历史内容则为对话模式
+  return false
 }
 
 /** 注入自定义毛玻璃样式与侧栏按钮完美居中样式 */
@@ -392,7 +523,6 @@ function injectCustomStyles(cfg: UserWhaleConfig) {
   const blurPx = Math.round(cfg.inputOpacity * 24)
 
   style.textContent = `
-    /* 侧栏 footerActions 与按钮绝对居中对齐 */
     div[class*="footerActions"] {
       display: flex !important;
       flex-direction: column !important;
@@ -411,7 +541,6 @@ function injectCustomStyles(cfg: UserWhaleConfig) {
       border-radius: 50% !important;
     }
 
-    /* 对话框自定义透明度与毛玻璃 */
     body[data-ds-dark-theme] {
       --dsw-specific-input-major: rgba(26, 28, 33, ${cfg.inputOpacity}) !important;
     }
@@ -448,7 +577,7 @@ function removeCustomStyles() {
   document.getElementById(STYLE_ID)?.remove()
 }
 
-/** 动态自适应挂载到侧边栏原生 footerActions 容器正中央 (100% 居中) */
+/** 动态自适应挂载到侧边栏原生 footerActions 容器正中央 */
 function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => void) {
   let existing = document.getElementById(BTN_ID)
   if (existing) existing.remove()
@@ -456,8 +585,8 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
   const btn = document.createElement('button')
   btn.id = BTN_ID
   btn.type = 'button'
-  btn.title = '3D 鲸鱼与外观调节'
-  btn.setAttribute('aria-label', '3D 鲸鱼与外观调节')
+  btn.title = '3D 鲸鱼与星河外观调节'
+  btn.setAttribute('aria-label', '3D 鲸鱼与星河外观调节')
   
   Object.assign(btn.style, {
     width: '36px',
@@ -476,7 +605,6 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
     padding: '0'
   })
 
-  // 专属微型 3D 鲸鱼 SVG 图标
   btn.innerHTML = `
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2 12c1-4 4-7 9-7 6 0 10 3 11 6-2 1-3 3-5 3-3 0-4-2-7-2-3 0-5 2-8 0z"></path>
@@ -519,7 +647,6 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
       return
     }
     
-    // 降级：若侧栏暂未挂载，精确定位在侧栏列中心 (X: 10px ~ 46px 中间)
     const sidebarRoot = document.querySelector('div[class*="SidebarRoot_root"], div[class*="AppFrame_sidebar"]')
     if (sidebarRoot) {
       const rect = sidebarRoot.getBoundingClientRect()
@@ -564,7 +691,7 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
     position: 'fixed',
     left: `${leftPos}px`,
     bottom: `${bottomPos}px`,
-    width: '270px',
+    width: '276px',
     zIndex: '10000',
     background: isDark ? 'rgba(28, 31, 38, 0.92)' : 'rgba(255, 255, 255, 0.94)',
     backdropFilter: 'blur(24px) saturate(160%)',
@@ -587,16 +714,23 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
     <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}; padding-bottom: 10px;">
       <div style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px;">
         <span style="color: #4D6BFE;">🐳</span>
-        <span>3D 鲸鱼与透明度调节</span>
+        <span>3D 鲸鱼与星河调节</span>
       </div>
       <button id="whale-cfg-close" style="background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 16px; padding: 0 4px;">✕</button>
     </div>
 
-    <!-- 1. 鲸鱼总开关 -->
+    <!-- 1. 鲸鱼总开关 & 星河开关 -->
     <div style="display: flex; align-items: center; justify-content: space-between;">
       <span style="font-size: 12px; color: ${isDark ? '#94a3b8' : '#64748b'};">3D 粒子鲸鱼</span>
       <button id="whale-cfg-enabled" style="height: 24px; padding: 0 10px; border-radius: 12px; border: none; font-size: 12px; cursor: pointer; background: ${currentConfig.enabled ? '#4D6BFE' : (isDark ? '#334155' : '#cbd5e1')}; color: #fff;">
         ${currentConfig.enabled ? '已开启' : '已关闭'}
+      </button>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <span style="font-size: 12px; color: ${isDark ? '#94a3b8' : '#64748b'};">🌌 浩瀚星河背景</span>
+      <button id="whale-cfg-galaxy" style="height: 24px; padding: 0 10px; border-radius: 12px; border: none; font-size: 12px; cursor: pointer; background: ${currentConfig.galaxy ? '#4D6BFE' : (isDark ? '#334155' : '#cbd5e1')}; color: #fff;">
+        ${currentConfig.galaxy ? '已开启' : '已关闭'}
       </button>
     </div>
 
@@ -651,6 +785,15 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
     onConfigChange(currentConfig)
   })
 
+  const btnGalaxy = panel.querySelector('#whale-cfg-galaxy') as HTMLButtonElement
+  btnGalaxy?.addEventListener('click', () => {
+    currentConfig.galaxy = !currentConfig.galaxy
+    btnGalaxy.textContent = currentConfig.galaxy ? '已开启' : '已关闭'
+    btnGalaxy.style.background = currentConfig.galaxy ? '#4D6BFE' : (isDark ? '#334155' : '#cbd5e1')
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
   const sliderScale = panel.querySelector('#slider-scale') as HTMLInputElement
   sliderScale?.addEventListener('input', () => {
     currentConfig.scale = Number(sliderScale.value) / 100
@@ -696,7 +839,7 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
 
 /** 状态检测 */
 let isAgentWorkingCached = false
-let isHeroScreenCached = true
+let isHeroScreenCached = false
 
 function updateAppState() {
   if (typeof document === 'undefined') return
@@ -742,12 +885,12 @@ function startWhaleAnimation(): () => void {
       zIndex: '1000',
       pointerEvents: 'none',
       overflow: 'hidden',
-      opacity: `${0.75 * currentConfig.brightness}`
+      opacity: `${0.80 * currentConfig.brightness}`
     })
     layer.setAttribute('aria-hidden', 'true')
     document.body.appendChild(layer)
   } else {
-    layer.style.opacity = `${0.75 * currentConfig.brightness}`
+    layer.style.opacity = `${0.80 * currentConfig.brightness}`
   }
 
   const reducedMotion =
@@ -767,6 +910,23 @@ function startWhaleAnimation(): () => void {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
   layer.appendChild(renderer.domElement)
 
+  // 1. 创建星河背景 Points
+  const galaxyGeometry = generateGalaxyData(800)
+  const galaxyMaterial = new THREE.ShaderMaterial({
+    vertexShader: GALAXY_VERTEX_SHADER,
+    fragmentShader: GALAXY_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uOpacity: { value: currentConfig.galaxy ? 0.65 : 0.0 }
+    }
+  })
+  const galaxyPoints = new THREE.Points(galaxyGeometry, galaxyMaterial)
+  scene.add(galaxyPoints)
+
+  // 2. 创建 3D 粒子鲸鱼
   const pixelData = generateVolumetricWhaleData(GRID_SIZE)
   const indexArray = new Float32Array(pixelData.count)
   for (let i = 0; i < pixelData.count; i++) indexArray[i] = i
@@ -811,6 +971,9 @@ function startWhaleAnimation(): () => void {
     material.uniforms.uIsDark.value = isDark ? 1.0 : 0.0
     material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending
     material.needsUpdate = true
+    if (galaxyMaterial) {
+      galaxyMaterial.uniforms.uOpacity.value = currentConfig.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
+    }
     if (layer) {
       layer.style.mixBlendMode = isDark ? 'screen' : 'normal'
     }
@@ -869,9 +1032,10 @@ function startWhaleAnimation(): () => void {
   }
   window.addEventListener('resize', onResize)
 
+  updateAppState()
   const stateTimer = setInterval(() => {
     updateAppState()
-  }, 150)
+  }, 120)
 
   // 散开与重组动画状态机
   type AnimState = 'idle' | 'scattering' | 'assembling'
@@ -886,7 +1050,7 @@ function startWhaleAnimation(): () => void {
 
   const clock = new THREE.Clock()
   let currentWorking = 0.0
-  let currentHeroProgress = 1.0 // 1.0 = 主界面(全屏大体态静止), 0.0 = 对话窗口(左下角小体态)
+  let currentHeroProgress = isHeroScreenCached ? 1.0 : 0.0
   let raf = 0
 
   const invMatrix = new THREE.Matrix4()
@@ -894,7 +1058,7 @@ function startWhaleAnimation(): () => void {
 
   // 3D 深度深海动力学控制器
   const swimAgent = {
-    pos: new THREE.Vector3(1.2, -0.4, 0.0),
+    pos: new THREE.Vector3(-5.8, -2.8, 0.0),
     yaw: Math.PI,
     pitch: 0,
     roll: 0,
@@ -941,9 +1105,21 @@ function startWhaleAnimation(): () => void {
 
     const D = material.uniforms.uAssembly.value
 
-    // 2. 状态平滑过渡
+    // 2. 更新星河背景
+    if (galaxyMaterial) {
+      galaxyMaterial.uniforms.uTime.value = elapsed
+      const targetGalaxyOpacity = currentConfig.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
+      galaxyMaterial.uniforms.uOpacity.value += (targetGalaxyOpacity - galaxyMaterial.uniforms.uOpacity.value) * 0.05
+      
+      if (mouseState.hasMoved) {
+        galaxyPoints.position.x = mouseState.smoothX * 0.03
+        galaxyPoints.position.y = mouseState.smoothY * 0.03
+      }
+    }
+
+    // 3. 场景状态平滑过渡：严格 Hero (1.0) vs 对话窗口 (0.0)
     const targetHero = isHeroScreenCached ? 1.0 : 0.0
-    currentHeroProgress += (targetHero - currentHeroProgress) * 0.06
+    currentHeroProgress += (targetHero - currentHeroProgress) * 0.08
 
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
     const lerpRate = targetWorking > currentWorking ? 0.06 : 0.03
@@ -951,12 +1127,12 @@ function startWhaleAnimation(): () => void {
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 3. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.28x（小巧伴随）
-    const baseScale = 1.00 * currentHeroProgress + 0.28 * (1.0 - currentHeroProgress)
+    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.26x（小巧伴随）
+    const baseScale = 1.00 * currentHeroProgress + 0.26 * (1.0 - currentHeroProgress)
     const currentScaleFactor = baseScale * currentConfig.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
-    // 4. 鼠标追踪阻尼
+    // 5. 鼠标追踪阻尼
     if (mouseState.hasMoved) {
       mouseState.smoothX += (mouseState.clientX - mouseState.smoothX) * DIGITILE_MOUSE_DEFAULTS.decay
       mouseState.smoothY += (mouseState.clientY - mouseState.smoothY) * DIGITILE_MOUSE_DEFAULTS.decay
@@ -968,10 +1144,10 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 5. 【位置与姿态动力学计算】
+    // 6. 【位置与姿态动力学计算】
     const userSpeedMult = currentConfig.speed
     if (currentHeroProgress > 0.5) {
-      // =====【主界面 (Hero) 状态】：变大且静止停驻 =====
+      // =====【主界面 (Hero) 状态】：变大且静止停驻在主视区 =====
       const heroTargetX = 1.2
       const heroTargetY = -0.3 + Math.sin(elapsed * 0.5) * 0.04
       const heroTargetZ = 0.0
@@ -988,17 +1164,18 @@ function startWhaleAnimation(): () => void {
     } else {
       // =====【对话窗口 (Chat) 状态】：缩小，游至「左下角」优雅伴随 =====
       const cornerT = elapsed * 0.75 * userSpeedMult
-      const blTargetX = -5.5 + Math.sin(cornerT) * 0.65
-      const blTargetY = -2.7 + Math.sin(cornerT * 2.0) * 0.28
-      const blTargetZ = Math.cos(cornerT) * 0.20
+      // 左下角专属水域 (X: -6.4 ~ -5.2, Y: -3.2 ~ -2.4)
+      const blTargetX = -5.8 + Math.sin(cornerT) * 0.55
+      const blTargetY = -2.8 + Math.sin(cornerT * 2.0) * 0.22
+      const blTargetZ = Math.cos(cornerT) * 0.18
 
-      const easeFactor = 0.06 * (1.0 - currentHeroProgress)
+      const easeFactor = 0.08 * (1.0 - currentHeroProgress)
       swimAgent.pos.x += (blTargetX - swimAgent.pos.x) * easeFactor
       swimAgent.pos.y += (blTargetY - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (blTargetZ - swimAgent.pos.z) * easeFactor
 
-      const blVx = Math.cos(cornerT) * 0.65 * 0.75
-      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.28 * 0.75
+      const blVx = Math.cos(cornerT) * 0.55 * 0.75
+      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.22 * 0.75
       const targetYawCorner = Math.atan2(blVy, blVx)
 
       swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
@@ -1017,7 +1194,7 @@ function startWhaleAnimation(): () => void {
       'ZYX'
     )
 
-    // 6. 颜色与发光
+    // 7. 颜色与发光
     if (isDark) {
       const r = (0.72 - 0.50 * currentWorking) * D
       const g = (0.82 + 0.15 * currentWorking) * D
@@ -1037,7 +1214,7 @@ function startWhaleAnimation(): () => void {
     raf = requestAnimationFrame(animate)
   }
 
-  // 7. 新建会话散开重组
+  // 8. 新建会话散开重组
   let lastClickTime = 0
   const onNewChatClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement | null
@@ -1086,6 +1263,8 @@ function startWhaleAnimation(): () => void {
     scene.clear()
     geometry.dispose()
     material.dispose()
+    galaxyGeometry.dispose()
+    galaxyMaterial.dispose()
     renderer.dispose()
     renderer.domElement?.remove()
     layer?.remove()
@@ -1107,7 +1286,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（主界面静止呈现、对话窗口自动缩小至左下角、侧栏快捷调节）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼与浩瀚星河背景（主界面静止呈现、对话窗口自动缩小至左下角、侧栏快捷调节）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -1115,7 +1294,7 @@ const zh = {
 
 const en = {
   title: '3D Particle Whale',
-  hint: 'Authentic 3D particle whale (Stationary hero presentation, mini bottom-left companion in chat).',
+  hint: 'Authentic 3D particle whale with cosmic galaxy starfield (Stationary hero, mini bottom-left in chat).',
   open: 'Turn on',
   close: 'Turn off',
   statusOn: 'On'
@@ -1211,7 +1390,7 @@ export function apply(ctx: any) {
     injectCustomStyles(cfg)
     const layer = document.getElementById(LAYER_ID)
     if (layer) {
-      layer.style.opacity = `${0.75 * cfg.brightness}`
+      layer.style.opacity = `${0.80 * cfg.brightness}`
     }
     if (cfg.enabled) {
       if (!activeCleanup) startWhaleAnimation()
