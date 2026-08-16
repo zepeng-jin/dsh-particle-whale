@@ -224,7 +224,7 @@ const VERTEX_SHADER = `
       float spineProg = clamp((targetCenter.x + 2.2) / 5.2, 0.0, 1.0);
       float tailFactor = spineProg * spineProg;
 
-      float swimFreq = mix(1.3, 2.6, uWorking);
+      float swimFreq = mix(1.3, 2.8, uWorking);
       float wavePhase = uTime * swimFreq - targetCenter.x * 0.9;
 
       float waveY = sin(wavePhase) * (0.03 + 0.22 * tailFactor);
@@ -323,7 +323,7 @@ interface UserWhaleConfig {
   brightness: number      // 0.2 ~ 1.8, 默认 1.0
   inputOpacity: number    // 0.2 ~ 1.0, 默认 0.88
   speed: number           // 0.5 ~ 2.0, 默认 1.0
-  scale: number           // 0.4 ~ 1.8, 默认 1.0 (全屏体型大小)
+  scale: number           // 0.4 ~ 1.8, 默认 1.0 (体型缩放)
 }
 
 const DEFAULT_CONFIG: UserWhaleConfig = {
@@ -359,7 +359,30 @@ function checkIsDarkTheme(): boolean {
   return document.body.hasAttribute('data-ds-dark-theme')
 }
 
-/** 注入自定义毛玻璃与自适应样式 */
+/** 检测当前是否为主界面 (Hero / Landing / 无对话空白页) */
+function checkIsHeroScreen(): boolean {
+  if (typeof document === 'undefined') return true
+  
+  // 1. 如果有活跃的消息节点/Turn，则必然不是 Hero 主界面
+  const hasMessages = document.querySelector(
+    'div[class*="Turn_root"], [data-node-id], div[class*="TurnStatus"], div[class*="ChatList"]'
+  )
+  if (hasMessages !== null) {
+    return false
+  }
+
+  // 2. 检查是否有 Hero 阶段标记或居中大标题
+  const isHeroPhase = document.querySelector(
+    '[data-phase="hero"], div[class*="heroWorkspaceRow"], div[class*="EmptyHero"], div[class*="composerHero"], div[class*="Hero"]'
+  )
+  if (isHeroPhase !== null) {
+    return true
+  }
+
+  return true
+}
+
+/** 注入自定义毛玻璃样式 */
 function injectCustomStyles(cfg: UserWhaleConfig) {
   let style = document.getElementById(STYLE_ID)
   if (!style) {
@@ -371,7 +394,7 @@ function injectCustomStyles(cfg: UserWhaleConfig) {
   const blurPx = Math.round(cfg.inputOpacity * 24)
 
   style.textContent = `
-    /* 对话框自定义透明度 */
+    /* 对话框自定义透明度与毛玻璃 */
     body[data-ds-dark-theme] {
       --dsw-specific-input-major: rgba(26, 28, 33, ${cfg.inputOpacity}) !important;
     }
@@ -408,7 +431,7 @@ function removeCustomStyles() {
   document.getElementById(STYLE_ID)?.remove()
 }
 
-/** 动态自适应挂载到侧边栏原生底部容器中 (100% 自动跟随侧栏宽度与对齐) */
+/** 动态自适应挂载到侧边栏原生底部容器中 */
 function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => void) {
   let existing = document.getElementById(BTN_ID)
   if (existing) existing.remove()
@@ -416,8 +439,8 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
   const btn = document.createElement('button')
   btn.id = BTN_ID
   btn.type = 'button'
-  btn.title = '3D 鲸鱼与透明度调节'
-  btn.setAttribute('aria-label', '3D 鲸鱼与透明度调节')
+  btn.title = '3D 鲸鱼与外观调节'
+  btn.setAttribute('aria-label', '3D 鲸鱼与外观调节')
   
   Object.assign(btn.style, {
     width: '32px',
@@ -435,7 +458,6 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
     flexShrink: '0'
   })
 
-  // 专属微型 3D 鲸鱼 SVG 图标
   btn.innerHTML = `
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2 12c1-4 4-7 9-7 6 0 10 3 11 6-2 1-3 3-5 3-3 0-4-2-7-2-3 0-5 2-8 0z"></path>
@@ -457,18 +479,15 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
     onTogglePanel(btn)
   }
 
-  // 挂载策略：优先插入到 DSH 侧边栏底部的 footerActions / settingsArea 之前
   const mountToSidebar = () => {
     const footArea = document.querySelector('div[class*="SidebarRoot_footArea"], div[class*="footArea"], div[class*="footerActions"]')
     if (footArea) {
       footArea.insertBefore(btn, footArea.firstChild)
     } else {
-      // 备用：若尚未渲染，挂在侧边栏主容器中
       const sidebarRoot = document.querySelector('div[class*="SidebarRoot_root"], div[class*="AppFrame_sidebar"]')
       if (sidebarRoot) {
         sidebarRoot.appendChild(btn)
       } else {
-        // 全局浮动对齐备用
         btn.style.position = 'fixed'
         btn.style.left = '12px'
         btn.style.bottom = '56px'
@@ -479,7 +498,6 @@ function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => voi
   }
 
   mountToSidebar()
-  // 定时器或观察器确保 DOM 重建后依然保持在侧栏中
   const observer = new MutationObserver(() => {
     if (!document.getElementById(BTN_ID)) {
       mountToSidebar()
@@ -505,7 +523,6 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
   const panel = document.createElement('div')
   panel.id = POPUP_ID
   
-  // 自适应对齐在按钮右侧
   const leftPos = Math.max(52, rect.right + 10)
   const bottomPos = Math.max(16, window.innerHeight - rect.bottom - 10)
 
@@ -549,16 +566,16 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
       </button>
     </div>
 
-    <!-- 2. 鲸鱼尺寸大小 -->
+    <!-- 2. 鲸鱼体型尺寸 -->
     <div style="display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; justify-content: space-between; font-size: 12px;">
-        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">鲸鱼体型尺寸</span>
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">鲸鱼体型缩放</span>
         <span id="val-scale" style="color: #4D6BFE; font-weight: 600;">${Math.round(currentConfig.scale * 100)}%</span>
       </div>
       <input id="slider-scale" type="range" min="40" max="180" value="${Math.round(currentConfig.scale * 100)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
     </div>
 
-    <!-- 3. 鲸鱼亮度 -->
+    <!-- 3. 发光亮度 -->
     <div style="display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; justify-content: space-between; font-size: 12px;">
         <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">发光亮度</span>
@@ -643,11 +660,17 @@ function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: U
   }, 50)
 }
 
-/** 检测 Agent 工作状态 */
+/** 状态检测 */
 let isAgentWorkingCached = false
-function updateAgentWorkingState() {
+let isHeroScreenCached = true
+
+function updateAppState() {
   if (typeof document === 'undefined') return
 
+  // 1. 是否处于主界面 (Hero)
+  isHeroScreenCached = checkIsHeroScreen()
+
+  // 2. 是否处于 Agent 思考生成中
   const stopButton = document.querySelector(
     'button[aria-label*="停止"], button[aria-label*="Stop"], button[aria-label*="stop"], [aria-label*="停止生成"], [aria-label*="Stop generating"], [data-action="stop"]'
   )
@@ -814,8 +837,8 @@ function startWhaleAnimation(): () => void {
   }
   window.addEventListener('resize', onResize)
 
-  const workingTimer = setInterval(() => {
-    updateAgentWorkingState()
+  const stateTimer = setInterval(() => {
+    updateAppState()
   }, 150)
 
   // 散开与重组动画状态机
@@ -831,6 +854,7 @@ function startWhaleAnimation(): () => void {
 
   const clock = new THREE.Clock()
   let currentWorking = 0.0
+  let currentHeroProgress = 1.0 // 1.0 = 主界面(全屏大体态), 0.0 = 对话窗口(右下角小体态)
   let raf = 0
 
   const invMatrix = new THREE.Matrix4()
@@ -887,16 +911,21 @@ function startWhaleAnimation(): () => void {
 
     const D = material.uniforms.uAssembly.value
 
-    // 2. 工作状态平滑过渡
+    // 2. 状态平滑过渡
+    // 2.1 主界面 (Hero) vs 对话窗口 (Chat) 过渡：只有主界面才变大，对话窗口直接缩小到右下角
+    const targetHero = isHeroScreenCached ? 1.0 : 0.0
+    currentHeroProgress += (targetHero - currentHeroProgress) * 0.05
+
+    // 2.2 工作状态平滑过渡
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
-    const lerpRate = targetWorking > currentWorking ? 0.05 : 0.03
+    const lerpRate = targetWorking > currentWorking ? 0.06 : 0.03
     currentWorking += (targetWorking - currentWorking) * lerpRate
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 3. 【尺寸与体型缩放】(融合用户设定的全屏基础尺寸 currentConfig.scale)
-    const userScaleMult = currentConfig.scale
-    const currentScaleFactor = (1.00 * (1.0 - currentWorking) + 0.30 * currentWorking) * userScaleMult * (0.75 + 0.25 * D)
+    // 3. 【尺寸计算】：主界面为 1.0x，对话窗口直接缩小为 0.28x（小巧不挡视线）
+    const baseScale = 1.00 * currentHeroProgress + 0.28 * (1.0 - currentHeroProgress)
+    const currentScaleFactor = baseScale * currentConfig.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
     // 4. 鼠标追踪阻尼
@@ -913,31 +942,32 @@ function startWhaleAnimation(): () => void {
 
     // 5. 【动力学巡游计算】
     const userSpeedMult = currentConfig.speed
-    if (currentWorking > 0.01) {
-      // 运行中：在右上角专属水域流畅进行微流线畅游
-      const cornerT = elapsed * 0.8 * userSpeedMult
-      const cornerTargetX = 6.4 + Math.sin(cornerT) * 1.0
-      const cornerTargetY = 2.85 + Math.sin(cornerT * 2.0) * 0.40
-      const cornerTargetZ = Math.cos(cornerT) * 0.30
+    if (currentHeroProgress < 0.90) {
+      // =====【对话窗口状态】：在右下角安全区域（X: 5.5 ~ 7.5, Y: -3.2 ~ -2.4）平稳畅游 =====
+      const cornerT = elapsed * 0.75 * userSpeedMult
+      // 右下角专属流线轨道 (Bottom-Right Ocean Orbit)
+      const brTargetX = 6.5 + Math.sin(cornerT) * 0.95
+      const brTargetY = -2.8 + Math.sin(cornerT * 2.0) * 0.35
+      const brTargetZ = Math.cos(cornerT) * 0.25
 
-      const easeFactor = 0.06 * currentWorking
-      swimAgent.pos.x += (cornerTargetX - swimAgent.pos.x) * easeFactor
-      swimAgent.pos.y += (cornerTargetY - swimAgent.pos.y) * easeFactor
-      swimAgent.pos.z += (cornerTargetZ - swimAgent.pos.z) * easeFactor
+      const easeFactor = 0.06 * (1.0 - currentHeroProgress)
+      swimAgent.pos.x += (brTargetX - swimAgent.pos.x) * easeFactor
+      swimAgent.pos.y += (brTargetY - swimAgent.pos.y) * easeFactor
+      swimAgent.pos.z += (brTargetZ - swimAgent.pos.z) * easeFactor
 
-      const cornerVx = Math.cos(cornerT) * 1.0 * 0.8
-      const cornerVy = 2.0 * Math.cos(cornerT * 2.0) * 0.40 * 0.8
-      const targetYawCorner = Math.atan2(cornerVy, cornerVx)
+      const brVx = Math.cos(cornerT) * 0.95 * 0.75
+      const brVy = 2.0 * Math.cos(cornerT * 2.0) * 0.35 * 0.75
+      const targetYawCorner = Math.atan2(brVy, brVx)
 
       swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
-      swimAgent.pitch += (cornerVy * 0.4 - swimAgent.pitch) * 0.06
+      swimAgent.pitch += (brVy * 0.4 - swimAgent.pitch) * 0.06
 
       let dYawCorner = targetYawCorner - swimAgent.yaw
       dYawCorner = Math.atan2(Math.sin(dYawCorner), Math.cos(dYawCorner))
       swimAgent.roll += (-dYawCorner * 0.6 - swimAgent.roll) * 0.06
 
     } else {
-      // 闲置状态：全屏自由前向巡游
+      // =====【主界面 (Hero) 状态】：全屏广阔大洋自由前向巡游 =====
       const boundX = 8.5
       const boundY = 3.8
       const boundZ = 3.2
@@ -986,7 +1016,7 @@ function startWhaleAnimation(): () => void {
       'ZYX'
     )
 
-    // 6. 颜色与亮度
+    // 6. 颜色与发光
     if (isDark) {
       const r = (0.72 - 0.50 * currentWorking) * D
       const g = (0.82 + 0.15 * currentWorking) * D
@@ -1042,7 +1072,7 @@ function startWhaleAnimation(): () => void {
 
   const cleanup = () => {
     cancelAnimationFrame(raf)
-    clearInterval(workingTimer)
+    clearInterval(stateTimer)
     themeObserver.disconnect()
     removeCustomStyles()
     removeSidebarQuickButton()
@@ -1076,7 +1106,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（全屏巡游、右上角游弋伴随、侧栏快捷调光与体型调节）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（主界面全屏漫游、对话窗口自动缩小至右下角、侧栏快捷调节）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -1084,7 +1114,7 @@ const zh = {
 
 const en = {
   title: '3D Particle Whale',
-  hint: 'Authentic 3D particle whale (Widescreen roaming, mini swimming companion, brightness and scale controls).',
+  hint: 'Authentic 3D particle whale (Widescreen roaming in hero, auto mini bottom-right in chat, quick controls).',
   open: 'Turn on',
   close: 'Turn off',
   statusOn: 'On'
