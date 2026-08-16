@@ -581,7 +581,7 @@ function startWhaleAnimation(): () => void {
   const invMatrix = new THREE.Matrix4()
   const localMouse = new THREE.Vector3()
 
-  // 3D 大范围深海巡游动力学控制器
+  // 3D 深度深海动力学控制器
   const swimAgent = {
     pos: new THREE.Vector3(0, 0, 0),
     yaw: Math.PI,
@@ -626,18 +626,18 @@ function startWhaleAnimation(): () => void {
 
     const D = material.uniforms.uAssembly.value
 
-    // 2. 工作状态过渡
+    // 2. 工作状态平滑过渡 (运行/思考时平滑过渡到 1.0)
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
-    const lerpRate = targetWorking > currentWorking ? 0.25 : 0.08
+    const lerpRate = targetWorking > currentWorking ? 0.08 : 0.04
     currentWorking += (targetWorking - currentWorking) * lerpRate
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 比例
-    const baseWhaleScale = 1.05 * (0.75 + 0.25 * D)
-    whaleGroup.scale.setScalar(baseWhaleScale)
+    // 3. 【核心尺寸动力学】：运行/工作中平滑缩小至右上角小灵宠（0.45x），闲置时恢复至 1.05x 壮阔体魄
+    const currentScaleFactor = (1.05 * (1.0 - currentWorking) + 0.45 * currentWorking) * (0.75 + 0.25 * D)
+    whaleGroup.scale.setScalar(currentScaleFactor)
 
-    // 3. 鼠标追踪阻尼
+    // 4. 鼠标追踪阻尼
     if (mouseState.hasMoved) {
       mouseState.smoothX += (mouseState.clientX - mouseState.smoothX) * DIGITILE_MOUSE_DEFAULTS.decay
       mouseState.smoothY += (mouseState.clientY - mouseState.smoothY) * DIGITILE_MOUSE_DEFAULTS.decay
@@ -649,53 +649,73 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 4. 【超大范围全屏深海 3D 巡游】(Full Widescreen 3D Cruising Bounds)
-    // 大幅拓展横向与纵向漫游视口范围
-    const boundX = 8.5   // 横跨全屏两侧边缘
-    const boundY = 3.8   // 贯穿顶部标题至底部状态栏
-    const boundZ = 3.2   // 纵深大范围浮沉
+    // 5. 【运行态右上角专注巡航 vs 闲置态全屏大漫游】
+    if (currentWorking > 0.05) {
+      // 运行/生成/思考中：游向右上角小区域（X: +6.5, Y: +2.8）并进行高能灵动微巡游
+      const cornerTargetX = 6.5 + Math.sin(elapsed * 1.5) * 0.6
+      const cornerTargetY = 2.8 + Math.cos(elapsed * 1.3) * 0.35
+      const cornerTargetZ = Math.sin(elapsed * 1.0) * 0.4
 
-    swimAgent.wanderInterval += delta
-    if (swimAgent.wanderInterval > (isAgentWorkingCached ? 2.5 : 4.5)) {
-      swimAgent.wanderInterval = 0
-      swimAgent.targetPitch = (Math.random() - 0.5) * 0.6
-      swimAgent.targetDepth = (Math.random() - 0.5) * boundZ
-      swimAgent.targetYaw += (Math.random() - 0.5) * 1.1
+      // 平滑向右上角巡航归位
+      const steerFactor = 0.05 + 0.05 * currentWorking
+      swimAgent.pos.x += (cornerTargetX - swimAgent.pos.x) * steerFactor
+      swimAgent.pos.y += (cornerTargetY - swimAgent.pos.y) * steerFactor
+      swimAgent.pos.z += (cornerTargetZ - swimAgent.pos.z) * steerFactor
+
+      // 右上角微环形游动的航向计算
+      const cornerVx = Math.cos(elapsed * 1.5) * 0.6 * 1.5
+      const cornerVy = -Math.sin(elapsed * 1.3) * 0.35 * 1.3
+      const targetYawCorner = Math.atan2(cornerVy, cornerVx)
+      swimAgent.yaw += (targetYawCorner - swimAgent.yaw) * 0.1
+      swimAgent.pitch += (-cornerVy * 0.3 - swimAgent.pitch) * 0.1
+      swimAgent.roll += ((-cornerVx * 0.4) - swimAgent.roll) * 0.08
+
+    } else {
+      // 闲置状态：在全屏广阔大洋中自由前向巡游
+      const boundX = 8.5
+      const boundY = 3.8
+      const boundZ = 3.2
+
+      swimAgent.wanderInterval += delta
+      if (swimAgent.wanderInterval > 4.5) {
+        swimAgent.wanderInterval = 0
+        swimAgent.targetPitch = (Math.random() - 0.5) * 0.6
+        swimAgent.targetDepth = (Math.random() - 0.5) * boundZ
+        swimAgent.targetYaw += (Math.random() - 0.5) * 1.1
+      }
+
+      // 边界碰撞规避
+      if (swimAgent.pos.x < -boundX) {
+        swimAgent.targetYaw = 0.0 + (Math.random() - 0.5) * 0.4
+      } else if (swimAgent.pos.x > boundX) {
+        swimAgent.targetYaw = Math.PI + (Math.random() - 0.5) * 0.4
+      }
+
+      if (swimAgent.pos.y < -boundY) {
+        swimAgent.targetPitch = 0.40
+      } else if (swimAgent.pos.y > boundY) {
+        swimAgent.targetPitch = -0.40
+      }
+
+      // 航向平滑转向
+      let dYaw = swimAgent.targetYaw - swimAgent.yaw
+      dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
+      swimAgent.yaw += dYaw * Math.min(1.0, 0.7 * delta)
+
+      let dPitch = swimAgent.targetPitch - swimAgent.pitch
+      swimAgent.pitch += dPitch * Math.min(1.0, 0.6 * delta)
+
+      const targetRoll = -dYaw * 1.2
+      swimAgent.roll += (targetRoll - swimAgent.roll) * 0.08
+
+      // 前向推进
+      const forwardSpeed = 1.1 * delta
+      swimAgent.pos.x += Math.cos(swimAgent.yaw) * Math.cos(swimAgent.pitch) * forwardSpeed
+      swimAgent.pos.y += Math.sin(swimAgent.pitch) * forwardSpeed
+
+      const dZ = swimAgent.targetDepth - swimAgent.pos.z
+      swimAgent.pos.z += dZ * 0.02 + Math.sin(elapsed * 0.5) * 0.005
     }
-
-    // 边界碰撞规避
-    if (swimAgent.pos.x < -boundX) {
-      swimAgent.targetYaw = 0.0 + (Math.random() - 0.5) * 0.4
-    } else if (swimAgent.pos.x > boundX) {
-      swimAgent.targetYaw = Math.PI + (Math.random() - 0.5) * 0.4
-    }
-
-    if (swimAgent.pos.y < -boundY) {
-      swimAgent.targetPitch = 0.40
-    } else if (swimAgent.pos.y > boundY) {
-      swimAgent.targetPitch = -0.40
-    }
-
-    // 航向平滑转向
-    let dYaw = swimAgent.targetYaw - swimAgent.yaw
-    dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
-    const turnRate = (0.7 + 1.2 * currentWorking) * delta
-    swimAgent.yaw += dYaw * Math.min(1.0, turnRate)
-
-    let dPitch = swimAgent.targetPitch - swimAgent.pitch
-    swimAgent.pitch += dPitch * Math.min(1.0, (0.6 + 0.8 * currentWorking) * delta)
-
-    // 3D 转向侧倾
-    const targetRoll = -dYaw * 1.2
-    swimAgent.roll += (targetRoll - swimAgent.roll) * 0.08
-
-    // 持续前向推进速度 (巡游速度匹配大范围)
-    const forwardSpeed = (1.1 + 1.9 * currentWorking) * delta
-    swimAgent.pos.x += Math.cos(swimAgent.yaw) * Math.cos(swimAgent.pitch) * forwardSpeed
-    swimAgent.pos.y += Math.sin(swimAgent.pitch) * forwardSpeed
-
-    const dZ = swimAgent.targetDepth - swimAgent.pos.z
-    swimAgent.pos.z += dZ * 0.02 + Math.sin(elapsed * 0.5) * 0.005
 
     // 更新 3D 姿态与位置
     whaleGroup.position.copy(swimAgent.pos)
@@ -707,7 +727,7 @@ function startWhaleAnimation(): () => void {
       'ZYX'
     )
 
-    // 5. 颜色更新
+    // 6. 颜色更新 (工作中极光青蓝，闲置深海幽蓝)
     if (isDark) {
       const r = (0.72 - 0.50 * currentWorking) * D
       const g = (0.82 + 0.15 * currentWorking) * D
@@ -727,13 +747,12 @@ function startWhaleAnimation(): () => void {
     raf = requestAnimationFrame(animate)
   }
 
-  // 6. 【精确定向监听：仅在点击“新建对话 / 新会话”时散开重组，普通点击绝对不散开】
+  // 7. 新建会话散开重组
   let lastClickTime = 0
   const onNewChatClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement | null
     if (!target) return
 
-    // 严谨检测是否为新建会话按钮 (New Chat / 新会话 / 新建 / +)
     const isNewChatBtn = Boolean(
       target.closest(
         'button[aria-label*="新建"], button[aria-label*="新会话"], button[aria-label*="New"], [data-action="new-session"], [data-action="create-session"], [data-action="new-chat"], [aria-label*="新建会话"], [aria-label*="New Chat"], [aria-label*="New Session"]'
@@ -755,7 +774,6 @@ function startWhaleAnimation(): () => void {
   }
   window.addEventListener('click', onNewChatClick, true)
 
-  // 支持键盘快捷键新建 (Cmd+N / Ctrl+N)
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'n' || e.key === 'N')) {
       triggerScatterAndAssemble()
@@ -797,7 +815,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（超大范围全屏深潜、新建会话散开重组、思考时极光加速）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角缩小伴随、新建会话散开重组）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -805,7 +823,7 @@ const zh = {
 
 const en = {
   title: '3D Particle Whale',
-  hint: 'Authentic 3D particle whale (Widescreen ocean roaming, scatter on new chat, aurora acceleration).',
+  hint: 'Authentic 3D particle whale (Widescreen roaming when idle, shrinks to top-right corner when active).',
   open: 'Turn on',
   close: 'Turn off',
   statusOn: 'On'

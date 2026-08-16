@@ -2,6 +2,8 @@
 
 > [English](./README.md) | [简体中文](./README.zh-CN.md)
 
+![DeepSeek Particle Whale Preview](./assets/preview.jpg)
+
 A native Three.js 3D particle whale background plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai) and DSH Desktop.
 
 Recreated with authentic WebGL shaders, full-screen forward fluid locomotion, volumetric 3D particle distribution, and real-time reactive state hooks.
@@ -13,8 +15,8 @@ Recreated with authentic WebGL shaders, full-screen forward fluid locomotion, vo
 - **Volumetric 3D Particle Mesh**: Uses distance-transform mapping to turn DeepSeek's 2D vector silhouette into a full 3D spindle body with curved dorsal/belly thickness, surface normals, specular highlights, and Fresnel rim glow.
 - **Head-First Forward Swimming**: True aquatic locomotion where the head guides the heading and traveling waves propagate down the spine to the flukes. Banks smoothly into turns across the full window.
 - **Reactive Agent State**:
-  - **Idle**: Calm, slow cruise (`0.9x speed`) with subtle tail undulation.
-  - **Active (Thinking / Streaming / Tool execution)**: Accelerates to `2.6x speed` with strong power strokes, spinal wave surges, and bioluminescent aurora pulse waves.
+  - **Idle**: Calm, full-screen widescreen cruise (`1.05x scale`, `1.1x speed`) with subtle tail undulation.
+  - **Active (Thinking / Streaming / Tool execution)**: Smoothly swims to the **top-right corner**, scales down into a mini companion indicator (`0.45x scale`), and orbits with high-energy bioluminescent pulse waves.
 - **New Session Scatter Effect**: Triggers a clean nebula explosion and reassembly animation only when creating a new session (`Cmd+N` / `Ctrl+N` or clicking the "New Chat" button). Casual clicks are ignored to keep reading undisturbed.
 - **Frosted Glass Composer**: Adds an 88% translucent frosted glass finish (`backdrop-filter: blur(20px)`) to the chat input card so the whale swims visibly underneath without affecting text contrast.
 - **Dark / Light Theme Adaptive**: Silver-cyan glowing particles with additive blending in dark mode; high-contrast deep sapphire particles in light mode.
@@ -35,6 +37,8 @@ dsh-particle-whale/
 ├── lib/
 │   ├── index.js          # Host entry (empty for client-only plugins)
 │   └── client.js         # Production bundle (zero runtime dependencies)
+├── assets/
+│   └── preview.jpg       # High-resolution visual showcase
 ├── README.md
 └── LICENSE
 ```
