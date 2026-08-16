@@ -224,11 +224,12 @@ const VERTEX_SHADER = `
       float spineProg = clamp((targetCenter.x + 2.2) / 5.2, 0.0, 1.0);
       float tailFactor = spineProg * spineProg;
 
-      float swimFreq = mix(1.3, 2.8, uWorking);
+      // 柔和自然的深海尾鳍微波
+      float swimFreq = mix(1.2, 2.6, uWorking);
       float wavePhase = uTime * swimFreq - targetCenter.x * 0.9;
 
-      float waveY = sin(wavePhase) * (0.03 + 0.22 * tailFactor);
-      float waveZ = cos(wavePhase * 0.85) * (0.02 + 0.15 * tailFactor);
+      float waveY = sin(wavePhase) * (0.02 + 0.18 * tailFactor);
+      float waveZ = cos(wavePhase * 0.85) * (0.015 + 0.12 * tailFactor);
 
       pos.y += waveY * loose;
       pos.z += waveZ * loose;
@@ -854,7 +855,7 @@ function startWhaleAnimation(): () => void {
 
   const clock = new THREE.Clock()
   let currentWorking = 0.0
-  let currentHeroProgress = 1.0 // 1.0 = 主界面(全屏大体态), 0.0 = 对话窗口(右下角小体态)
+  let currentHeroProgress = 1.0 // 1.0 = 主界面(全屏大体态静止), 0.0 = 对话窗口(左下角小体态)
   let raf = 0
 
   const invMatrix = new THREE.Matrix4()
@@ -862,14 +863,12 @@ function startWhaleAnimation(): () => void {
 
   // 3D 深度深海动力学控制器
   const swimAgent = {
-    pos: new THREE.Vector3(0, 0, 0),
+    pos: new THREE.Vector3(1.2, -0.4, 0.0),
     yaw: Math.PI,
     pitch: 0,
     roll: 0,
     targetYaw: Math.PI,
-    targetPitch: 0,
-    targetDepth: 0,
-    wanderInterval: 0
+    targetPitch: 0
   }
 
   function smoothAngle(current: number, target: number, speed: number): number {
@@ -912,9 +911,9 @@ function startWhaleAnimation(): () => void {
     const D = material.uniforms.uAssembly.value
 
     // 2. 状态平滑过渡
-    // 2.1 主界面 (Hero) vs 对话窗口 (Chat) 过渡：只有主界面才变大，对话窗口直接缩小到右下角
+    // 2.1 主界面 (Hero) vs 对话窗口 (Chat) 过渡：只有主界面才变大且不动，对话窗口直接缩小到左下角
     const targetHero = isHeroScreenCached ? 1.0 : 0.0
-    currentHeroProgress += (targetHero - currentHeroProgress) * 0.05
+    currentHeroProgress += (targetHero - currentHeroProgress) * 0.06
 
     // 2.2 工作状态平滑过渡
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
@@ -923,7 +922,7 @@ function startWhaleAnimation(): () => void {
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 3. 【尺寸计算】：主界面为 1.0x，对话窗口直接缩小为 0.28x（小巧不挡视线）
+    // 3. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.28x（小巧伴随）
     const baseScale = 1.00 * currentHeroProgress + 0.28 * (1.0 - currentHeroProgress)
     const currentScaleFactor = baseScale * currentConfig.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
@@ -940,72 +939,48 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 5. 【动力学巡游计算】
+    // 5. 【位置与姿态动力学计算】
     const userSpeedMult = currentConfig.speed
-    if (currentHeroProgress < 0.90) {
-      // =====【对话窗口状态】：在右下角安全区域（X: 5.5 ~ 7.5, Y: -3.2 ~ -2.4）平稳畅游 =====
+    if (currentHeroProgress > 0.5) {
+      // =====【主界面 (Hero) 状态】：变大，且静止停驻在主视区，不动 =====
+      // 固定在输入框右侧/背景处 (X: 1.2, Y: -0.3, Z: 0.0)，仅带极其轻微的 0.04 呼吸微浮
+      const heroTargetX = 1.2
+      const heroTargetY = -0.3 + Math.sin(elapsed * 0.5) * 0.04
+      const heroTargetZ = 0.0
+
+      const easeFactor = 0.08 * currentHeroProgress
+      swimAgent.pos.x += (heroTargetX - swimAgent.pos.x) * easeFactor
+      swimAgent.pos.y += (heroTargetY - swimAgent.pos.y) * easeFactor
+      swimAgent.pos.z += (heroTargetZ - swimAgent.pos.z) * easeFactor
+
+      // 朝向：端正朝向左方（望向探索未至之境标题）
+      swimAgent.yaw = smoothAngle(swimAgent.yaw, Math.PI, 0.08)
+      swimAgent.pitch += (0.0 - swimAgent.pitch) * 0.08
+      swimAgent.roll += (0.0 - swimAgent.roll) * 0.08
+
+    } else {
+      // =====【对话窗口 (Chat) 状态】：缩小，游至「左下角」优雅伴随 =====
       const cornerT = elapsed * 0.75 * userSpeedMult
-      // 右下角专属流线轨道 (Bottom-Right Ocean Orbit)
-      const brTargetX = 6.5 + Math.sin(cornerT) * 0.95
-      const brTargetY = -2.8 + Math.sin(cornerT * 2.0) * 0.35
-      const brTargetZ = Math.cos(cornerT) * 0.25
+      // 左下角专属流线轨道 (Bottom-Left Orbit: X: -6.2 ~ -4.8, Y: -3.2 ~ -2.4)
+      const blTargetX = -5.5 + Math.sin(cornerT) * 0.65
+      const blTargetY = -2.7 + Math.sin(cornerT * 2.0) * 0.28
+      const blTargetZ = Math.cos(cornerT) * 0.20
 
       const easeFactor = 0.06 * (1.0 - currentHeroProgress)
-      swimAgent.pos.x += (brTargetX - swimAgent.pos.x) * easeFactor
-      swimAgent.pos.y += (brTargetY - swimAgent.pos.y) * easeFactor
-      swimAgent.pos.z += (brTargetZ - swimAgent.pos.z) * easeFactor
+      swimAgent.pos.x += (blTargetX - swimAgent.pos.x) * easeFactor
+      swimAgent.pos.y += (blTargetY - swimAgent.pos.y) * easeFactor
+      swimAgent.pos.z += (blTargetZ - swimAgent.pos.z) * easeFactor
 
-      const brVx = Math.cos(cornerT) * 0.95 * 0.75
-      const brVy = 2.0 * Math.cos(cornerT * 2.0) * 0.35 * 0.75
-      const targetYawCorner = Math.atan2(brVy, brVx)
+      const blVx = Math.cos(cornerT) * 0.65 * 0.75
+      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.28 * 0.75
+      const targetYawCorner = Math.atan2(blVy, blVx)
 
       swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
-      swimAgent.pitch += (brVy * 0.4 - swimAgent.pitch) * 0.06
+      swimAgent.pitch += (blVy * 0.4 - swimAgent.pitch) * 0.06
 
       let dYawCorner = targetYawCorner - swimAgent.yaw
       dYawCorner = Math.atan2(Math.sin(dYawCorner), Math.cos(dYawCorner))
       swimAgent.roll += (-dYawCorner * 0.6 - swimAgent.roll) * 0.06
-
-    } else {
-      // =====【主界面 (Hero) 状态】：全屏广阔大洋自由前向巡游 =====
-      const boundX = 8.5
-      const boundY = 3.8
-      const boundZ = 3.2
-
-      swimAgent.wanderInterval += delta
-      if (swimAgent.wanderInterval > 5.0) {
-        swimAgent.wanderInterval = 0
-        swimAgent.targetPitch = (Math.random() - 0.5) * 0.5
-        swimAgent.targetDepth = (Math.random() - 0.5) * boundZ
-        swimAgent.targetYaw += (Math.random() - 0.5) * 0.8
-      }
-
-      if (swimAgent.pos.x < -boundX) {
-        swimAgent.targetYaw = 0.0 + (Math.random() - 0.5) * 0.3
-      } else if (swimAgent.pos.x > boundX) {
-        swimAgent.targetYaw = Math.PI + (Math.random() - 0.5) * 0.3
-      }
-
-      if (swimAgent.pos.y < -boundY) {
-        swimAgent.targetPitch = 0.35
-      } else if (swimAgent.pos.y > boundY) {
-        swimAgent.targetPitch = -0.35
-      }
-
-      swimAgent.yaw = smoothAngle(swimAgent.yaw, swimAgent.targetYaw, 0.5 * delta)
-      swimAgent.pitch += (swimAgent.targetPitch - swimAgent.pitch) * 0.5 * delta
-
-      let dYaw = swimAgent.targetYaw - swimAgent.yaw
-      dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
-      const targetRoll = -dYaw * 0.8
-      swimAgent.roll += (targetRoll - swimAgent.roll) * 0.05
-
-      const forwardSpeed = 0.95 * delta * userSpeedMult
-      swimAgent.pos.x += Math.cos(swimAgent.yaw) * Math.cos(swimAgent.pitch) * forwardSpeed
-      swimAgent.pos.y += Math.sin(swimAgent.pitch) * forwardSpeed
-
-      const dZ = swimAgent.targetDepth - swimAgent.pos.z
-      swimAgent.pos.z += dZ * 0.015 + Math.sin(elapsed * 0.4) * 0.004
     }
 
     whaleGroup.position.copy(swimAgent.pos)
@@ -1106,7 +1081,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（主界面全屏漫游、对话窗口自动缩小至右下角、侧栏快捷调节）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（主界面全屏静止呈现、对话窗口自动缩小至左下角、侧栏快捷调节）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -1114,7 +1089,7 @@ const zh = {
 
 const en = {
   title: '3D Particle Whale',
-  hint: 'Authentic 3D particle whale (Widescreen roaming in hero, auto mini bottom-right in chat, quick controls).',
+  hint: 'Authentic 3D particle whale (Stationary hero presentation, mini bottom-left companion in chat).',
   open: 'Turn on',
   close: 'Turn off',
   statusOn: 'On'
