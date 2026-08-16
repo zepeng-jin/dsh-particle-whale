@@ -2,8 +2,6 @@
 
 > [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-![DeepSeek Particle Whale Preview](./assets/preview.jpg)
-
 A native Three.js 3D particle whale background plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai) and DSH Desktop.
 
 Recreated with authentic WebGL shaders, full-screen forward fluid locomotion, volumetric 3D particle distribution, and real-time reactive state hooks.
@@ -37,8 +35,6 @@ dsh-particle-whale/
 ├── lib/
 │   ├── index.js          # Host entry (empty for client-only plugins)
 │   └── client.js         # Production bundle (zero runtime dependencies)
-├── assets/
-│   └── preview.jpg       # High-resolution visual showcase
 ├── README.md
 └── LICENSE
 ```

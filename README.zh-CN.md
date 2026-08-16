@@ -2,8 +2,6 @@
 
 > [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-![DeepSeek 粒子鲸鱼演示预览](./assets/preview.jpg)
-
 DeepSeek 官方同款 3D 粒子鲸鱼插件（Three.js WebGL），专为 **DeepSeek Harness (DSH)** 及 **DSH Desktop** 打造。
 
 ---
@@ -36,8 +34,6 @@ dsh-particle-whale/
 ├── lib/
 │   ├── index.js          # Host 端空入口（纯前端 UI 插件）
 │   └── client.js         # 生产编译产物（单文件免外部依赖，内置 Three.js）
-├── assets/
-│   └── preview.jpg       # 高清效果展示图
 ├── README.md
 └── LICENSE
 ```
