@@ -219,17 +219,17 @@ const VERTEX_SHADER = `
 
     float loose = uLoose * assembly;
     if (loose > 0.001) {
-      pos += aJitter * loose * (0.8 + 0.5 * uWorking);
+      pos += aJitter * loose * (0.8 + 0.6 * uWorking);
 
       float spineProg = clamp((targetCenter.x + 2.2) / 5.2, 0.0, 1.0);
       float tailFactor = spineProg * spineProg;
 
-      // 舒缓优雅的尾鳍律动（避免剧烈摇晃）
-      float swimFreq = mix(1.2, 2.2, uWorking);
+      // 舒缓有力的流线型尾摆推力
+      float swimFreq = mix(1.3, 2.6, uWorking);
       float wavePhase = uTime * swimFreq - targetCenter.x * 0.9;
 
-      float waveY = sin(wavePhase) * (0.03 + 0.18 * tailFactor);
-      float waveZ = cos(wavePhase * 0.85) * (0.02 + 0.12 * tailFactor);
+      float waveY = sin(wavePhase) * (0.03 + 0.22 * tailFactor);
+      float waveZ = cos(wavePhase * 0.85) * (0.02 + 0.15 * tailFactor);
 
       pos.y += waveY * loose;
       pos.z += waveZ * loose;
@@ -582,7 +582,7 @@ function startWhaleAnimation(): () => void {
   const invMatrix = new THREE.Matrix4()
   const localMouse = new THREE.Vector3()
 
-  // 3D 深度深海动力学控制器（全平滑插值）
+  // 3D 深度深海动力学控制器
   const swimAgent = {
     pos: new THREE.Vector3(0, 0, 0),
     yaw: Math.PI,
@@ -594,7 +594,6 @@ function startWhaleAnimation(): () => void {
     wanderInterval: 0
   }
 
-  // 辅助函数：角度最短弧插值（彻底消除从 -PI 到 +PI 的突变跳跃）
   function smoothAngle(current: number, target: number, speed: number): number {
     let diff = target - current
     diff = Math.atan2(Math.sin(diff), Math.cos(diff))
@@ -634,15 +633,15 @@ function startWhaleAnimation(): () => void {
 
     const D = material.uniforms.uAssembly.value
 
-    // 2. 工作状态极平滑过渡 (慢阻尼过渡，绝无突变)
+    // 2. 工作状态过渡
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
-    const lerpRate = targetWorking > currentWorking ? 0.04 : 0.03
+    const lerpRate = targetWorking > currentWorking ? 0.05 : 0.03
     currentWorking += (targetWorking - currentWorking) * lerpRate
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 3. 【更精致的小巧体量】：闲置时 1.0x 适中比例，运行时平滑缩小至 0.28x（小巧迷你小伴侣，绝不挡字）
-    const currentScaleFactor = (1.00 * (1.0 - currentWorking) + 0.28 * currentWorking) * (0.75 + 0.25 * D)
+    // 3. 【比例控制】：闲置时 1.0x，运行时平滑缩小至 0.30x
+    const currentScaleFactor = (1.00 * (1.0 - currentWorking) + 0.30 * currentWorking) * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
     // 4. 鼠标追踪阻尼
@@ -657,30 +656,36 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 5. 【极其平滑、优雅舒缓的巡游与右上角伴随（彻底告别剧烈打转与角度突变）】
+    // 5. 【动力学巡游计算】
     if (currentWorking > 0.01) {
-      // 运行态：平稳游向右上角（X: 6.8, Y: 3.0），面向左侧优雅浮动，绝对不剧烈打转
-      const cornerTargetX = 6.8 + Math.sin(elapsed * 0.5) * 0.20
-      const cornerTargetY = 3.0 + Math.cos(elapsed * 0.4) * 0.12
-      const cornerTargetZ = Math.sin(elapsed * 0.3) * 0.15
+      // 运行中：在右上角专属水域（X: 5.5 ~ 7.5, Y: 2.3 ~ 3.4）内持续流畅进行「微流线巡弋畅游」
+      const cornerT = elapsed * 0.8
+      // 优美的平滑 8 字形/椭圆巡游轨迹 (Continuous Ocean Looping in Top-Right)
+      const cornerTargetX = 6.4 + Math.sin(cornerT) * 1.0
+      const cornerTargetY = 2.85 + Math.sin(cornerT * 2.0) * 0.40
+      const cornerTargetZ = Math.cos(cornerT) * 0.30
 
-      // 柔和趋近目标点
-      const easeFactor = 0.03 * currentWorking
+      // 平滑朝向右上角游动点过渡
+      const easeFactor = 0.06 * currentWorking
       swimAgent.pos.x += (cornerTargetX - swimAgent.pos.x) * easeFactor
       swimAgent.pos.y += (cornerTargetY - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (cornerTargetZ - swimAgent.pos.z) * easeFactor
 
-      // 姿态保持沉稳朝向左侧前方（Yaw = PI，头部自然朝左），伴随极其轻微舒缓的微俯仰与侧倾
-      const calmYaw = Math.PI + Math.sin(elapsed * 0.4) * 0.10
-      const calmPitch = Math.sin(elapsed * 0.5) * 0.08
-      const calmRoll = Math.cos(elapsed * 0.3) * 0.05
+      // 实时速度切线向量，驱动自然航向（持续前向畅游）
+      const cornerVx = Math.cos(cornerT) * 1.0 * 0.8
+      const cornerVy = 2.0 * Math.cos(cornerT * 2.0) * 0.40 * 0.8
+      const targetYawCorner = Math.atan2(cornerVy, cornerVx)
 
-      swimAgent.yaw = smoothAngle(swimAgent.yaw, calmYaw, 0.04)
-      swimAgent.pitch += (calmPitch - swimAgent.pitch) * 0.04
-      swimAgent.roll += (calmRoll - swimAgent.roll) * 0.04
+      swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
+      swimAgent.pitch += (cornerVy * 0.4 - swimAgent.pitch) * 0.06
+
+      // 转向时的优雅侧倾
+      let dYawCorner = targetYawCorner - swimAgent.yaw
+      dYawCorner = Math.atan2(Math.sin(dYawCorner), Math.cos(dYawCorner))
+      swimAgent.roll += (-dYawCorner * 0.6 - swimAgent.roll) * 0.06
 
     } else {
-      // 闲置态：在广阔全屏大洋中自然巡游
+      // 闲置状态：在全屏广阔大洋中自由前向巡游
       const boundX = 8.5
       const boundY = 3.8
       const boundZ = 3.2
@@ -822,7 +827,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角小巧伴随、新建会话散开重组）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角小巧游弋、新建会话散开重组）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -830,7 +835,7 @@ const zh = {
 
 const en = {
   title: '3D Particle Whale',
-  hint: 'Authentic 3D particle whale (Widescreen roaming when idle, shrinks to top-right corner when active).',
+  hint: 'Authentic 3D particle whale (Widescreen roaming when idle, actively swims in top-right corner when working).',
   open: 'Turn on',
   close: 'Turn off',
   statusOn: 'On'
