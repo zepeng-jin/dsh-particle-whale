@@ -268,7 +268,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
   const invMatrix = new THREE.Matrix4()
   const localMouse = new THREE.Vector3()
 
-  // 3D 深度深海动力学控制器初始点 (距离底部 175px)
+  // 3D 深度深海动力学控制器初始点
   const initialWorldPos = getScreenWorldPos(camera, 130, window.innerHeight - 175)
   const swimAgent = {
     pos: initialWorldPos.clone(),
@@ -335,7 +335,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.22x
+    // 4. 【尺寸计算】：主界面 1.0x，对话窗口 0.22x
     const baseScale = 1.00 * currentHeroProgress + 0.22 * (1.0 - currentHeroProgress)
     const currentScaleFactor = baseScale * cfg.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
@@ -352,12 +352,12 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 6. 【精确屏幕像素反投影与动力学姿态】
+    // 6. 【超长周期、多频非谐随机深海游弋动力学】
     const userSpeedMult = cfg.speed
     if (currentHeroProgress > 0.5) {
-      // =====【主界面 (Hero) 状态】：主视觉区偏右停驻，微幅呼吸 =====
+      // =====【主界面 (Hero) 状态】：主视觉区停驻，深海宏伟舒缓呼吸 =====
       const heroPixelX = window.innerWidth * 0.58
-      const heroPixelY = window.innerHeight * 0.48 + Math.sin(elapsed * 0.5) * 8
+      const heroPixelY = window.innerHeight * 0.48 + Math.sin(elapsed * 0.35) * 6
       const heroWorld = getScreenWorldPos(camera, heroPixelX, heroPixelY, 0)
 
       const easeFactor = 0.08 * currentHeroProgress
@@ -365,12 +365,12 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       swimAgent.pos.y += (heroWorld.y - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (heroWorld.z - swimAgent.pos.z) * easeFactor
 
-      swimAgent.yaw = smoothAngle(swimAgent.yaw, Math.PI, 0.08)
-      swimAgent.pitch += (0.0 - swimAgent.pitch) * 0.08
-      swimAgent.roll += (0.0 - swimAgent.roll) * 0.08
+      swimAgent.yaw = smoothAngle(swimAgent.yaw, Math.PI, 0.05)
+      swimAgent.pitch += (0.0 - swimAgent.pitch) * 0.05
+      swimAgent.roll += (0.0 - swimAgent.roll) * 0.05
 
     } else {
-      // =====【对话窗口 (Chat) 状态】：左下方舒适水域 =====
+      // =====【对话窗口 (Chat) 状态】：超长周期、有机随机巡游 (拒绝死循环旋转) =====
       const sidebarEl = document.querySelector('aside, [class*="SidebarRoot_root"], [class*="sidebar"]')
       const sidebarRight = sidebarEl ? sidebarEl.getBoundingClientRect().right : 56
 
@@ -378,26 +378,51 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       const targetPixelY = window.innerHeight - 175
       const baseCornerWorld = getScreenWorldPos(camera, targetPixelX, targetPixelY, 0)
 
-      const cornerT = elapsed * 0.70 * userSpeedMult
-      const blTargetX = baseCornerWorld.x + Math.sin(cornerT) * 0.28
-      const blTargetY = baseCornerWorld.y + Math.sin(cornerT * 2.0) * 0.14
-      const blTargetZ = Math.cos(cornerT) * 0.10
+      // 采用非谐无理频段 (0.24, 0.091, 0.037)，运动周期长达数百秒，轨迹永不重复
+      const t = elapsed * 0.22 * userSpeedMult
 
-      const easeFactor = 0.08 * (1.0 - currentHeroProgress)
+      // 广阔随机平缓位移 (Wander Orbit)
+      const wanderX =
+        Math.sin(t * 0.42) * 0.32 +
+        Math.sin(t * 0.16 + 1.3) * 0.22 +
+        Math.cos(t * 0.058 + 2.7) * 0.16
+
+      const wanderY =
+        Math.sin(t * 0.29 + 0.7) * 0.16 +
+        Math.cos(t * 0.095 + 3.2) * 0.12
+
+      const wanderZ =
+        Math.cos(t * 0.24 + 1.5) * 0.14 +
+        Math.sin(t * 0.073) * 0.08
+
+      const blTargetX = baseCornerWorld.x + wanderX
+      const blTargetY = baseCornerWorld.y + wanderY
+      const blTargetZ = wanderZ
+
+      const easeFactor = 0.06 * (1.0 - currentHeroProgress)
       swimAgent.pos.x += (blTargetX - swimAgent.pos.x) * easeFactor
       swimAgent.pos.y += (blTargetY - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (blTargetZ - swimAgent.pos.z) * easeFactor
 
-      const blVx = Math.cos(cornerT) * 0.28 * 0.70
-      const blVy = 2.0 * Math.cos(cornerT * 2.0) * 0.14 * 0.70
-      const targetYawCorner = Math.atan2(blVy, blVx)
+      // 运动切线速度 (用于计算超自然舒缓朝向)
+      const vx =
+        Math.cos(t * 0.42) * 0.32 * 0.42 +
+        Math.cos(t * 0.16 + 1.3) * 0.22 * 0.16 -
+        Math.sin(t * 0.058 + 2.7) * 0.16 * 0.058
 
-      swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
-      swimAgent.pitch += (blVy * 0.4 - swimAgent.pitch) * 0.06
+      const vy =
+        Math.cos(t * 0.29 + 0.7) * 0.16 * 0.29 -
+        Math.sin(t * 0.095 + 3.2) * 0.12 * 0.095
 
-      let dYawCorner = targetYawCorner - swimAgent.yaw
-      dYawCorner = Math.atan2(Math.sin(dYawCorner), Math.cos(dYawCorner))
-      swimAgent.roll += (-dYawCorner * 0.6 - swimAgent.roll) * 0.06
+      const targetYawCorner = Math.atan2(vy, vx)
+
+      // 极其平缓自然的转向阻尼（避免急转与转圈）
+      swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.025)
+      swimAgent.pitch += (vy * 0.25 - swimAgent.pitch) * 0.03
+
+      let dYaw = targetYawCorner - swimAgent.yaw
+      dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
+      swimAgent.roll += (-dYaw * 0.35 - swimAgent.roll) * 0.03
     }
 
     whaleGroup.position.copy(swimAgent.pos)
