@@ -323,7 +323,7 @@ interface UserWhaleConfig {
   brightness: number      // 0.2 ~ 1.8, 默认 1.0
   inputOpacity: number    // 0.2 ~ 1.0, 默认 0.88
   speed: number           // 0.5 ~ 2.0, 默认 1.0
-  railWidth: number       // 38 ~ 56px, 默认 46px
+  scale: number           // 0.4 ~ 1.8, 默认 1.0 (全屏体型大小)
 }
 
 const DEFAULT_CONFIG: UserWhaleConfig = {
@@ -331,7 +331,7 @@ const DEFAULT_CONFIG: UserWhaleConfig = {
   brightness: 1.0,
   inputOpacity: 0.88,
   speed: 1.0,
-  railWidth: 46
+  scale: 1.0
 }
 
 function loadConfig(): UserWhaleConfig {
@@ -359,7 +359,7 @@ function checkIsDarkTheme(): boolean {
   return document.body.hasAttribute('data-ds-dark-theme')
 }
 
-/** 注入精致窄侧栏与自定义毛玻璃样式 */
+/** 注入自定义毛玻璃与自适应样式 */
 function injectCustomStyles(cfg: UserWhaleConfig) {
   let style = document.getElementById(STYLE_ID)
   if (!style) {
@@ -368,41 +368,10 @@ function injectCustomStyles(cfg: UserWhaleConfig) {
     document.head.appendChild(style)
   }
 
-  const rw = cfg.railWidth
   const blurPx = Math.round(cfg.inputOpacity * 24)
 
   style.textContent = `
-    /* 1. 精致紧凑窄侧栏 (Narrow Rail) */
-    div[class*="AppFrame_root"] {
-      grid-template-columns: ${rw}px minmax(0, 1fr) !important;
-    }
-    div[class*="AppFrame_sidebar"] {
-      width: ${rw}px !important;
-      min-width: ${rw}px !important;
-      max-width: ${rw}px !important;
-    }
-    div[class*="SidebarRoot_root"][class*="collapsed"] {
-      width: ${rw}px !important;
-      padding: 12px 3px 6px !important;
-      box-sizing: border-box !important;
-    }
-    div[class*="SidebarRoot_root"][class*="collapsed"] button,
-    div[class*="SidebarRoot_root"][class*="collapsed"] a {
-      width: 32px !important;
-      height: 32px !important;
-      margin: 0 auto 6px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      border-radius: 8px !important;
-    }
-    div[class*="SidebarRoot_logoRow"] {
-      height: 48px !important;
-      padding: 4px 0 !important;
-      justify-content: center !important;
-    }
-
-    /* 2. 对话框自定义透明度 */
+    /* 对话框自定义透明度 */
     body[data-ds-dark-theme] {
       --dsw-specific-input-major: rgba(26, 28, 33, ${cfg.inputOpacity}) !important;
     }
@@ -439,24 +408,20 @@ function removeCustomStyles() {
   document.getElementById(STYLE_ID)?.remove()
 }
 
-/** 注入侧边栏专属快捷控制入口 */
-function injectSidebarQuickButton(onTogglePanel: () => void) {
+/** 动态自适应挂载到侧边栏原生底部容器中 (100% 自动跟随侧栏宽度与对齐) */
+function injectSidebarQuickButton(onTogglePanel: (anchorBtn: HTMLElement) => void) {
   let existing = document.getElementById(BTN_ID)
   if (existing) existing.remove()
 
   const btn = document.createElement('button')
   btn.id = BTN_ID
   btn.type = 'button'
-  btn.title = '鲸鱼与透明度调节 (Whale & Glass Controls)'
-  btn.setAttribute('aria-label', '鲸鱼与透明度调节')
+  btn.title = '3D 鲸鱼与透明度调节'
+  btn.setAttribute('aria-label', '3D 鲸鱼与透明度调节')
   
   Object.assign(btn.style, {
-    position: 'fixed',
-    left: '7px',
-    bottom: '54px',
     width: '32px',
     height: '32px',
-    zIndex: '9999',
     background: 'transparent',
     border: 'none',
     borderRadius: '8px',
@@ -464,11 +429,13 @@ function injectSidebarQuickButton(onTogglePanel: () => void) {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    margin: '0 auto 8px',
     color: 'var(--dsw-alias-label-secondary, #94a3b8)',
-    transition: 'all 0.2s ease'
+    transition: 'all 0.2s ease',
+    flexShrink: '0'
   })
 
-  // 专属微型小鲸鱼 SVG 图标
+  // 专属微型 3D 鲸鱼 SVG 图标
   btn.innerHTML = `
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2 12c1-4 4-7 9-7 6 0 10 3 11 6-2 1-3 3-5 3-3 0-4-2-7-2-3 0-5 2-8 0z"></path>
@@ -487,10 +454,38 @@ function injectSidebarQuickButton(onTogglePanel: () => void) {
   }
   btn.onclick = (e) => {
     e.stopPropagation()
-    onTogglePanel()
+    onTogglePanel(btn)
   }
 
-  document.body.appendChild(btn)
+  // 挂载策略：优先插入到 DSH 侧边栏底部的 footerActions / settingsArea 之前
+  const mountToSidebar = () => {
+    const footArea = document.querySelector('div[class*="SidebarRoot_footArea"], div[class*="footArea"], div[class*="footerActions"]')
+    if (footArea) {
+      footArea.insertBefore(btn, footArea.firstChild)
+    } else {
+      // 备用：若尚未渲染，挂在侧边栏主容器中
+      const sidebarRoot = document.querySelector('div[class*="SidebarRoot_root"], div[class*="AppFrame_sidebar"]')
+      if (sidebarRoot) {
+        sidebarRoot.appendChild(btn)
+      } else {
+        // 全局浮动对齐备用
+        btn.style.position = 'fixed'
+        btn.style.left = '12px'
+        btn.style.bottom = '56px'
+        btn.style.zIndex = '9999'
+        document.body.appendChild(btn)
+      }
+    }
+  }
+
+  mountToSidebar()
+  // 定时器或观察器确保 DOM 重建后依然保持在侧栏中
+  const observer = new MutationObserver(() => {
+    if (!document.getElementById(BTN_ID)) {
+      mountToSidebar()
+    }
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
 }
 
 function removeSidebarQuickButton() {
@@ -498,7 +493,7 @@ function removeSidebarQuickButton() {
 }
 
 /** 渲染侧栏弹出的毛玻璃快捷调节浮窗 (Liquid Glass Popover Panel) */
-function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void) {
+function toggleQuickControlPanel(anchorBtn: HTMLElement, onConfigChange: (cfg: UserWhaleConfig) => void) {
   let existing = document.getElementById(POPUP_ID)
   if (existing) {
     existing.remove()
@@ -506,14 +501,19 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
   }
 
   const isDark = checkIsDarkTheme()
+  const rect = anchorBtn.getBoundingClientRect()
   const panel = document.createElement('div')
   panel.id = POPUP_ID
   
+  // 自适应对齐在按钮右侧
+  const leftPos = Math.max(52, rect.right + 10)
+  const bottomPos = Math.max(16, window.innerHeight - rect.bottom - 10)
+
   Object.assign(panel.style, {
     position: 'fixed',
-    left: '52px',
-    bottom: '48px',
-    width: '260px',
+    left: `${leftPos}px`,
+    bottom: `${bottomPos}px`,
+    width: '270px',
     zIndex: '10000',
     background: isDark ? 'rgba(28, 31, 38, 0.92)' : 'rgba(255, 255, 255, 0.94)',
     backdropFilter: 'blur(24px) saturate(160%)',
@@ -536,7 +536,7 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
     <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}; padding-bottom: 10px;">
       <div style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px;">
         <span style="color: #4D6BFE;">🐳</span>
-        <span>鲸鱼与侧栏外观调节</span>
+        <span>3D 鲸鱼与透明度调节</span>
       </div>
       <button id="whale-cfg-close" style="background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 16px; padding: 0 4px;">✕</button>
     </div>
@@ -549,31 +549,31 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
       </button>
     </div>
 
-    <!-- 2. 鲸鱼亮度 -->
+    <!-- 2. 鲸鱼尺寸大小 -->
     <div style="display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; justify-content: space-between; font-size: 12px;">
-        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">鲸鱼发光亮度</span>
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">鲸鱼体型尺寸</span>
+        <span id="val-scale" style="color: #4D6BFE; font-weight: 600;">${Math.round(currentConfig.scale * 100)}%</span>
+      </div>
+      <input id="slider-scale" type="range" min="40" max="180" value="${Math.round(currentConfig.scale * 100)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
+    </div>
+
+    <!-- 3. 鲸鱼亮度 -->
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">发光亮度</span>
         <span id="val-brightness" style="color: #4D6BFE; font-weight: 600;">${Math.round(currentConfig.brightness * 100)}%</span>
       </div>
       <input id="slider-brightness" type="range" min="30" max="180" value="${Math.round(currentConfig.brightness * 100)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
     </div>
 
-    <!-- 3. 对话框透明度 -->
+    <!-- 4. 对话框透明度 -->
     <div style="display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; justify-content: space-between; font-size: 12px;">
         <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">对话输入框微透度</span>
         <span id="val-input-opacity" style="color: #4D6BFE; font-weight: 600;">${Math.round(currentConfig.inputOpacity * 100)}%</span>
       </div>
       <input id="slider-input-opacity" type="range" min="30" max="100" value="${Math.round(currentConfig.inputOpacity * 100)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
-    </div>
-
-    <!-- 4. 侧栏宽度 -->
-    <div style="display: flex; flex-direction: column; gap: 4px;">
-      <div style="display: flex; justify-content: space-between; font-size: 12px;">
-        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">侧栏宽度 (窄边调节)</span>
-        <span id="val-rail-width" style="color: #4D6BFE; font-weight: 600;">${currentConfig.railWidth}px</span>
-      </div>
-      <input id="slider-rail-width" type="range" min="38" max="56" value="${currentConfig.railWidth}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
     </div>
 
     <!-- 5. 游动巡游速度 -->
@@ -589,7 +589,6 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
   panel.onclick = (e) => e.stopPropagation()
   document.body.appendChild(panel)
 
-  // 绑定事件
   panel.querySelector('#whale-cfg-close')?.addEventListener('click', () => panel.remove())
 
   const btnToggle = panel.querySelector('#whale-cfg-enabled') as HTMLButtonElement
@@ -597,6 +596,14 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
     currentConfig.enabled = !currentConfig.enabled
     btnToggle.textContent = currentConfig.enabled ? '已开启' : '已关闭'
     btnToggle.style.background = currentConfig.enabled ? '#4D6BFE' : (isDark ? '#334155' : '#cbd5e1')
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
+  const sliderScale = panel.querySelector('#slider-scale') as HTMLInputElement
+  sliderScale?.addEventListener('input', () => {
+    currentConfig.scale = Number(sliderScale.value) / 100
+    panel.querySelector('#val-scale')!.textContent = `${sliderScale.value}%`
     saveConfig(currentConfig)
     onConfigChange(currentConfig)
   })
@@ -617,14 +624,6 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
     onConfigChange(currentConfig)
   })
 
-  const sliderRail = panel.querySelector('#slider-rail-width') as HTMLInputElement
-  sliderRail?.addEventListener('input', () => {
-    currentConfig.railWidth = Number(sliderRail.value)
-    panel.querySelector('#val-rail-width')!.textContent = `${sliderRail.value}px`
-    saveConfig(currentConfig)
-    onConfigChange(currentConfig)
-  })
-
   const sliderSpeed = panel.querySelector('#slider-speed') as HTMLInputElement
   sliderSpeed?.addEventListener('input', () => {
     currentConfig.speed = Number(sliderSpeed.value) / 10
@@ -633,9 +632,8 @@ function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void)
     onConfigChange(currentConfig)
   })
 
-  // 点击外部自动关闭
   const onOutsideClick = (e: MouseEvent) => {
-    if (!panel.contains(e.target as Node) && e.target !== document.getElementById(BTN_ID)) {
+    if (!panel.contains(e.target as Node) && e.target !== anchorBtn) {
       panel.remove()
       window.removeEventListener('click', onOutsideClick, true)
     }
@@ -896,8 +894,9 @@ function startWhaleAnimation(): () => void {
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 3. 【比例控制】：闲置时 1.0x，运行时平滑缩小至 0.30x
-    const currentScaleFactor = (1.00 * (1.0 - currentWorking) + 0.30 * currentWorking) * (0.75 + 0.25 * D)
+    // 3. 【尺寸与体型缩放】(融合用户设定的全屏基础尺寸 currentConfig.scale)
+    const userScaleMult = currentConfig.scale
+    const currentScaleFactor = (1.00 * (1.0 - currentWorking) + 0.30 * currentWorking) * userScaleMult * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
     // 4. 鼠标追踪阻尼
@@ -912,7 +911,7 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 5. 【动力学巡游计算】(结合用户设定的速度倍率)
+    // 5. 【动力学巡游计算】
     const userSpeedMult = currentConfig.speed
     if (currentWorking > 0.01) {
       // 运行中：在右上角专属水域流畅进行微流线畅游
@@ -1077,7 +1076,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角小巧游弋、侧栏快捷调光）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（全屏巡游、右上角游弋伴随、侧栏快捷调光与体型调节）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -1085,7 +1084,7 @@ const zh = {
 
 const en = {
   title: '3D Particle Whale',
-  hint: 'Authentic 3D particle whale (Widescreen roaming when idle, actively swims in top-right corner when working).',
+  hint: 'Authentic 3D particle whale (Widescreen roaming, mini swimming companion, brightness and scale controls).',
   open: 'Turn on',
   close: 'Turn off',
   statusOn: 'On'
@@ -1191,10 +1190,9 @@ export function apply(ctx: any) {
     sync(cfg.enabled)
   }
 
-  // 始终挂载侧栏快捷控制入口（即使鲸鱼关闭也能在侧栏唤出面板一键打开）
   injectCustomStyles(currentConfig)
-  injectSidebarQuickButton(() => {
-    toggleQuickControlPanel((cfg) => {
+  injectSidebarQuickButton((anchorBtn) => {
+    toggleQuickControlPanel(anchorBtn, (cfg) => {
       onApplyConfig(cfg)
     })
   })
