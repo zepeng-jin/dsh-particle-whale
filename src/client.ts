@@ -1,9 +1,9 @@
 import { UserWhaleConfig } from './types'
-import { DEFAULT_CONFIG, STORAGE_KEY, LAYER_ID, POPUP_ID } from './constants'
-import { injectCustomStyles } from './ui/styles'
+import { DEFAULT_CONFIG, STORAGE_KEY, POPUP_ID } from './constants'
+import { injectCustomStyles, removeCustomStyles } from './ui/styles'
 import { injectSidebarQuickButton, removeSidebarQuickButton } from './ui/sidebarButton'
 import { toggleQuickControlPanel, saveConfig } from './ui/quickPanel'
-import { startWhaleAnimation, stopWhaleAnimation } from './scene/whaleScene'
+import { startWhaleAnimation, stopWhaleAnimation, updateWhaleSceneConfig } from './scene/whaleScene'
 import { registerSettingsSlot } from './settingsSlot'
 
 export const inject = ['slots', 'locale']
@@ -26,19 +26,20 @@ export function apply(ctx: any) {
 
   // 1. 应用与更新配置
   const onApplyConfig = (cfg: UserWhaleConfig) => {
+    const prevEnabled = currentConfig.enabled
     currentConfig = cfg
     saveConfig(cfg)
     injectCustomStyles(cfg)
 
-    const layer = document.getElementById(LAYER_ID)
-    if (layer) {
-      layer.style.opacity = `${0.80 * cfg.brightness}`
-    }
-
-    if (cfg.enabled) {
-      startWhaleAnimation(currentConfig)
-    } else {
-      stopWhaleAnimation()
+    if (cfg.enabled !== prevEnabled) {
+      if (cfg.enabled) {
+        startWhaleAnimation(currentConfig)
+      } else {
+        stopWhaleAnimation()
+      }
+    } else if (cfg.enabled) {
+      // 实时热更新 uniform，不销毁场景与 UI 浮窗
+      updateWhaleSceneConfig(cfg)
     }
 
     settingsHandle?.sync(cfg.enabled)
@@ -62,6 +63,7 @@ export function apply(ctx: any) {
   ctx.effect(() => () => {
     stopWhaleAnimation()
     removeSidebarQuickButton()
+    removeCustomStyles()
     document.getElementById(POPUP_ID)?.remove()
   }, 'dsh-particle-whale: teardown')
 }

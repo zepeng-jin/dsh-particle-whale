@@ -4,18 +4,19 @@ import {
   DIGITILE_LIGHT_DEFAULTS,
   DIGITILE_MOUSE_DEFAULTS,
   GRID_SIZE,
-  LAYER_ID,
-  POPUP_ID
+  LAYER_ID
 } from '../constants'
 import { WHALE_VERTEX_SHADER, WHALE_FRAGMENT_SHADER } from '../shaders/whale.glsl'
 import { GALAXY_VERTEX_SHADER, GALAXY_FRAGMENT_SHADER } from '../shaders/galaxy.glsl'
 import { generateVolumetricWhaleData } from '../geometry/whaleData'
 import { generateGalaxyData } from '../geometry/galaxyData'
 import { checkIsDarkTheme, checkIsHeroScreen, checkIsAgentWorking } from './stateDetector'
-import { injectCustomStyles, removeCustomStyles } from '../ui/styles'
-import { removeSidebarQuickButton } from '../ui/sidebarButton'
+import { injectCustomStyles } from '../ui/styles'
 
 let activeCleanup: (() => void) | null = null
+let activeConfigRef: UserWhaleConfig | null = null
+let activeMaterial: THREE.ShaderMaterial | null = null
+let activeGalaxyMaterial: THREE.ShaderMaterial | null = null
 
 function smoothAngle(current: number, target: number, speed: number): number {
   let diff = target - current
@@ -41,10 +42,36 @@ function getScreenWorldPos(
 }
 
 /**
+ * 实时动态更新 3D 场景配置 (无需销毁重建场景)
+ */
+export function updateWhaleSceneConfig(cfg: UserWhaleConfig): void {
+  activeConfigRef = cfg
+
+  const layer = document.getElementById(LAYER_ID)
+  if (layer) {
+    layer.style.opacity = `${0.80 * cfg.brightness}`
+  }
+
+  if (activeMaterial) {
+    activeMaterial.uniforms.uShadeMax.value = DIGITILE_LIGHT_DEFAULTS.shadeMax * cfg.brightness
+  }
+
+  if (activeGalaxyMaterial) {
+    const isDark = checkIsDarkTheme()
+    activeGalaxyMaterial.uniforms.uOpacity.value = cfg.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
+  }
+}
+
+/**
  * 启动 3D 粒子鲸鱼与星河背景动画
  */
 export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void {
-  stopWhaleAnimation()
+  if (activeCleanup) {
+    updateWhaleSceneConfig(currentConfig)
+    return activeCleanup
+  }
+
+  activeConfigRef = currentConfig
 
   const probe = document.createElement('canvas')
   const gl = probe.getContext('webgl2') ?? probe.getContext('webgl')
@@ -100,6 +127,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       uOpacity: { value: currentConfig.galaxy ? 0.65 : 0.0 }
     }
   })
+  activeGalaxyMaterial = galaxyMaterial
   const galaxyPoints = new THREE.Points(galaxyGeometry, galaxyMaterial)
   scene.add(galaxyPoints)
 
@@ -142,14 +170,15 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       uWorking: { value: 0.0 }
     }
   })
+  activeMaterial = material
 
   const syncThemeStyle = () => {
     isDark = checkIsDarkTheme()
     material.uniforms.uIsDark.value = isDark ? 1.0 : 0.0
     material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending
     material.needsUpdate = true
-    if (galaxyMaterial) {
-      galaxyMaterial.uniforms.uOpacity.value = currentConfig.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
+    if (galaxyMaterial && activeConfigRef) {
+      galaxyMaterial.uniforms.uOpacity.value = activeConfigRef.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
     }
     if (layer) {
       layer.style.mixBlendMode = isDark ? 'screen' : 'normal'
@@ -239,7 +268,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
   const invMatrix = new THREE.Matrix4()
   const localMouse = new THREE.Vector3()
 
-  // 3D 深度深海动力学控制器初始点 (距离底部 175px，优雅悬浮在左下方安全区)
+  // 3D 深度深海动力学控制器初始点 (距离底部 175px)
   const initialWorldPos = getScreenWorldPos(camera, 130, window.innerHeight - 175)
   const swimAgent = {
     pos: initialWorldPos.clone(),
@@ -254,6 +283,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     raf = requestAnimationFrame(animate)
     const delta = Math.min(clock.getDelta(), 0.05)
     const elapsed = clock.getElapsedTime()
+    const cfg = activeConfigRef || currentConfig
 
     // 1. 散开与重组
     if (animState === 'scattering') {
@@ -286,7 +316,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     // 2. 更新星河背景
     if (galaxyMaterial) {
       galaxyMaterial.uniforms.uTime.value = elapsed
-      const targetGalaxyOpacity = currentConfig.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
+      const targetGalaxyOpacity = cfg.galaxy ? (isDark ? 0.65 : 0.20) : 0.0
       galaxyMaterial.uniforms.uOpacity.value += (targetGalaxyOpacity - galaxyMaterial.uniforms.uOpacity.value) * 0.05
       
       if (mouseState.hasMoved) {
@@ -305,9 +335,9 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.22x（精致灵动灵宠）
+    // 4. 【尺寸计算】：主界面为 1.0x（宏伟），对话窗口直接缩小为 0.22x
     const baseScale = 1.00 * currentHeroProgress + 0.22 * (1.0 - currentHeroProgress)
-    const currentScaleFactor = baseScale * currentConfig.scale * (0.75 + 0.25 * D)
+    const currentScaleFactor = baseScale * cfg.scale * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
     // 5. 鼠标追踪阻尼
@@ -323,7 +353,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     }
 
     // 6. 【精确屏幕像素反投影与动力学姿态】
-    const userSpeedMult = currentConfig.speed
+    const userSpeedMult = cfg.speed
     if (currentHeroProgress > 0.5) {
       // =====【主界面 (Hero) 状态】：主视觉区偏右停驻，微幅呼吸 =====
       const heroPixelX = window.innerWidth * 0.58
@@ -340,11 +370,10 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       swimAgent.roll += (0.0 - swimAgent.roll) * 0.08
 
     } else {
-      // =====【对话窗口 (Chat) 状态】：左下方舒适水域 (高度适中，不沉底) =====
+      // =====【对话窗口 (Chat) 状态】：左下方舒适水域 =====
       const sidebarEl = document.querySelector('aside, [class*="SidebarRoot_root"], [class*="sidebar"]')
       const sidebarRight = sidebarEl ? sidebarEl.getBoundingClientRect().right : 56
 
-      // 目标像素点：距离侧栏右侧 85px，距离屏幕物理底部 175px（舒适悬浮在左下方，不被底部或输入框卡片遮挡）
       const targetPixelX = sidebarRight + 85
       const targetPixelY = window.innerHeight - 175
       const baseCornerWorld = getScreenWorldPos(camera, targetPixelX, targetPixelY, 0)
@@ -352,7 +381,7 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
       const cornerT = elapsed * 0.70 * userSpeedMult
       const blTargetX = baseCornerWorld.x + Math.sin(cornerT) * 0.28
       const blTargetY = baseCornerWorld.y + Math.sin(cornerT * 2.0) * 0.14
-      const blTargetZ = Math.cos(cornerT) * 0.12
+      const blTargetZ = Math.cos(cornerT) * 0.10
 
       const easeFactor = 0.08 * (1.0 - currentHeroProgress)
       swimAgent.pos.x += (blTargetX - swimAgent.pos.x) * easeFactor
@@ -437,9 +466,6 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     cancelAnimationFrame(raf)
     clearInterval(stateTimer)
     themeObserver.disconnect()
-    removeCustomStyles()
-    removeSidebarQuickButton()
-    document.getElementById(POPUP_ID)?.remove()
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('resize', onResize)
     window.removeEventListener('click', onNewChatClick, true)
@@ -453,6 +479,9 @@ export function startWhaleAnimation(currentConfig: UserWhaleConfig): () => void 
     renderer.dispose()
     renderer.domElement?.remove()
     layer?.remove()
+    activeMaterial = null
+    activeGalaxyMaterial = null
+    activeConfigRef = null
     if (activeCleanup === cleanup) activeCleanup = null
   }
 
