@@ -2,6 +2,23 @@
   "name": "dsh-particle-whale",
   "version": "0.1.0",
   "description": "DeepSeek official 3D Three.js particle whale animation for DeepSeek Harness / DSH Desktop",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "dsh-desktop",
+    "dshmarket",
+    "threejs",
+    "particle-whale",
+    "ui-enhancement",
+    "theme"
+  ],
+  "homepage": "https://github.com/zepeng-jin/dsh-particle-whale",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zepeng-jin/dsh-particle-whale.git"
+  },
+  "author": "zepeng-jin <zepengjin@163.com>",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -14,12 +31,15 @@
     "lib/index.js",
     "lib/client.js",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md"
   ],
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "prepublishOnly": "node build.mjs"
   },
   "dsh": {
+    "category": "ui",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
