@@ -210,7 +210,7 @@ const VERTEX_SHADER = `
     vec3 targetCenter = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     vec3 localOffset = (instanceMatrix * vec4(position, 1.0)).xyz - targetCenter;
 
-    float pulse = 1.0 + 0.18 * uWorking * sin(uTime * 4.5 + aIndex * 0.4);
+    float pulse = 1.0 + 0.12 * uWorking * sin(uTime * 3.5 + aIndex * 0.4);
     localOffset *= pulse;
 
     float assembly = smoothstep(0.0, 1.0, uAssembly);
@@ -219,16 +219,17 @@ const VERTEX_SHADER = `
 
     float loose = uLoose * assembly;
     if (loose > 0.001) {
-      pos += aJitter * loose * (0.8 + 1.2 * uWorking);
+      pos += aJitter * loose * (0.8 + 0.5 * uWorking);
 
       float spineProg = clamp((targetCenter.x + 2.2) / 5.2, 0.0, 1.0);
       float tailFactor = spineProg * spineProg;
 
-      float swimFreq = mix(1.6, 4.0, uWorking);
+      // 舒缓优雅的尾鳍律动（避免剧烈摇晃）
+      float swimFreq = mix(1.2, 2.2, uWorking);
       float wavePhase = uTime * swimFreq - targetCenter.x * 0.9;
 
-      float waveY = sin(wavePhase) * (0.04 + 0.32 * tailFactor) * (1.0 + 0.8 * uWorking);
-      float waveZ = cos(wavePhase * 0.85) * (0.02 + 0.18 * tailFactor) * (1.0 + 0.8 * uWorking);
+      float waveY = sin(wavePhase) * (0.03 + 0.18 * tailFactor);
+      float waveZ = cos(wavePhase * 0.85) * (0.02 + 0.12 * tailFactor);
 
       pos.y += waveY * loose;
       pos.z += waveZ * loose;
@@ -290,21 +291,21 @@ const FRAGMENT_SHADER = `
     vec3 H = normalize(L + V);
     float spec = pow(max(0.0, dot(N, H)), 8.0) * 0.45;
 
-    float pulseSpeed = mix(1.2, 5.0, vWorking);
+    float pulseSpeed = mix(1.0, 3.0, vWorking);
     float pulseWave = sin(uTime * pulseSpeed - vWorldPos.x * 2.2 + vWorldPos.y * 1.5) * 0.5 + 0.5;
-    float workingGlow = vWorking * pulseWave * 0.40;
+    float workingGlow = vWorking * pulseWave * 0.35;
 
     if (uIsDark > 0.5) {
       float baseAlpha = mix(0.40, 0.80, vAssembly) + fresnel * 0.35 + workingGlow;
       float alpha = vOpacity * baseAlpha;
 
-      vec3 activeColor = mix(uColor, vec3(0.10, 0.95, 1.0), vWorking * 0.60);
+      vec3 activeColor = mix(uColor, vec3(0.10, 0.95, 1.0), vWorking * 0.50);
       vec3 color = activeColor * (diff * vLight + spec) + fresnel * vec3(0.3, 0.6, 1.0) * vLight;
       color = mix(color, color * vec3(1.10, 1.05, 0.95), clamp(vLight - 1.0, 0.0, 1.0));
       gl_FragColor = vec4(color, alpha);
     } else {
-      float alpha = vOpacity * (mix(0.50, 0.85, vAssembly) + fresnel * 0.3 + workingGlow * 0.4);
-      vec3 activeColor = mix(uColor, vec3(0.05, 0.45, 0.95), vWorking * 0.5);
+      float alpha = vOpacity * (mix(0.50, 0.85, vAssembly) + fresnel * 0.3 + workingGlow * 0.3);
+      vec3 activeColor = mix(uColor, vec3(0.05, 0.45, 0.95), vWorking * 0.4);
       vec3 lightBaseColor = activeColor * (0.50 + 0.50 * diff * min(vLight, 1.5)) + fresnel * vec3(0.15, 0.35, 0.8);
       gl_FragColor = vec4(lightBaseColor, alpha);
     }
@@ -581,7 +582,7 @@ function startWhaleAnimation(): () => void {
   const invMatrix = new THREE.Matrix4()
   const localMouse = new THREE.Vector3()
 
-  // 3D 深度深海动力学控制器
+  // 3D 深度深海动力学控制器（全平滑插值）
   const swimAgent = {
     pos: new THREE.Vector3(0, 0, 0),
     yaw: Math.PI,
@@ -591,6 +592,13 @@ function startWhaleAnimation(): () => void {
     targetPitch: 0,
     targetDepth: 0,
     wanderInterval: 0
+  }
+
+  // 辅助函数：角度最短弧插值（彻底消除从 -PI 到 +PI 的突变跳跃）
+  function smoothAngle(current: number, target: number, speed: number): number {
+    let diff = target - current
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff))
+    return current + diff * Math.min(1.0, speed)
   }
 
   const animate = () => {
@@ -626,15 +634,15 @@ function startWhaleAnimation(): () => void {
 
     const D = material.uniforms.uAssembly.value
 
-    // 2. 工作状态平滑过渡 (运行/思考时平滑过渡到 1.0)
+    // 2. 工作状态极平滑过渡 (慢阻尼过渡，绝无突变)
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
-    const lerpRate = targetWorking > currentWorking ? 0.08 : 0.04
+    const lerpRate = targetWorking > currentWorking ? 0.04 : 0.03
     currentWorking += (targetWorking - currentWorking) * lerpRate
     material.uniforms.uWorking.value = currentWorking
     material.uniforms.uTime.value = elapsed
 
-    // 3. 【核心尺寸动力学】：运行/工作中平滑缩小至右上角小灵宠（0.45x），闲置时恢复至 1.05x 壮阔体魄
-    const currentScaleFactor = (1.05 * (1.0 - currentWorking) + 0.45 * currentWorking) * (0.75 + 0.25 * D)
+    // 3. 【更精致的小巧体量】：闲置时 1.0x 适中比例，运行时平滑缩小至 0.28x（小巧迷你小伴侣，绝不挡字）
+    const currentScaleFactor = (1.00 * (1.0 - currentWorking) + 0.28 * currentWorking) * (0.75 + 0.25 * D)
     whaleGroup.scale.setScalar(currentScaleFactor)
 
     // 4. 鼠标追踪阻尼
@@ -649,72 +657,71 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 5. 【运行态右上角专注巡航 vs 闲置态全屏大漫游】
-    if (currentWorking > 0.05) {
-      // 运行/生成/思考中：游向右上角小区域（X: +6.5, Y: +2.8）并进行高能灵动微巡游
-      const cornerTargetX = 6.5 + Math.sin(elapsed * 1.5) * 0.6
-      const cornerTargetY = 2.8 + Math.cos(elapsed * 1.3) * 0.35
-      const cornerTargetZ = Math.sin(elapsed * 1.0) * 0.4
+    // 5. 【极其平滑、优雅舒缓的巡游与右上角伴随（彻底告别剧烈打转与角度突变）】
+    if (currentWorking > 0.01) {
+      // 运行态：平稳游向右上角（X: 6.8, Y: 3.0），面向左侧优雅浮动，绝对不剧烈打转
+      const cornerTargetX = 6.8 + Math.sin(elapsed * 0.5) * 0.20
+      const cornerTargetY = 3.0 + Math.cos(elapsed * 0.4) * 0.12
+      const cornerTargetZ = Math.sin(elapsed * 0.3) * 0.15
 
-      // 平滑向右上角巡航归位
-      const steerFactor = 0.05 + 0.05 * currentWorking
-      swimAgent.pos.x += (cornerTargetX - swimAgent.pos.x) * steerFactor
-      swimAgent.pos.y += (cornerTargetY - swimAgent.pos.y) * steerFactor
-      swimAgent.pos.z += (cornerTargetZ - swimAgent.pos.z) * steerFactor
+      // 柔和趋近目标点
+      const easeFactor = 0.03 * currentWorking
+      swimAgent.pos.x += (cornerTargetX - swimAgent.pos.x) * easeFactor
+      swimAgent.pos.y += (cornerTargetY - swimAgent.pos.y) * easeFactor
+      swimAgent.pos.z += (cornerTargetZ - swimAgent.pos.z) * easeFactor
 
-      // 右上角微环形游动的航向计算
-      const cornerVx = Math.cos(elapsed * 1.5) * 0.6 * 1.5
-      const cornerVy = -Math.sin(elapsed * 1.3) * 0.35 * 1.3
-      const targetYawCorner = Math.atan2(cornerVy, cornerVx)
-      swimAgent.yaw += (targetYawCorner - swimAgent.yaw) * 0.1
-      swimAgent.pitch += (-cornerVy * 0.3 - swimAgent.pitch) * 0.1
-      swimAgent.roll += ((-cornerVx * 0.4) - swimAgent.roll) * 0.08
+      // 姿态保持沉稳朝向左侧前方（Yaw = PI，头部自然朝左），伴随极其轻微舒缓的微俯仰与侧倾
+      const calmYaw = Math.PI + Math.sin(elapsed * 0.4) * 0.10
+      const calmPitch = Math.sin(elapsed * 0.5) * 0.08
+      const calmRoll = Math.cos(elapsed * 0.3) * 0.05
+
+      swimAgent.yaw = smoothAngle(swimAgent.yaw, calmYaw, 0.04)
+      swimAgent.pitch += (calmPitch - swimAgent.pitch) * 0.04
+      swimAgent.roll += (calmRoll - swimAgent.roll) * 0.04
 
     } else {
-      // 闲置状态：在全屏广阔大洋中自由前向巡游
+      // 闲置态：在广阔全屏大洋中自然巡游
       const boundX = 8.5
       const boundY = 3.8
       const boundZ = 3.2
 
       swimAgent.wanderInterval += delta
-      if (swimAgent.wanderInterval > 4.5) {
+      if (swimAgent.wanderInterval > 5.0) {
         swimAgent.wanderInterval = 0
-        swimAgent.targetPitch = (Math.random() - 0.5) * 0.6
+        swimAgent.targetPitch = (Math.random() - 0.5) * 0.5
         swimAgent.targetDepth = (Math.random() - 0.5) * boundZ
-        swimAgent.targetYaw += (Math.random() - 0.5) * 1.1
+        swimAgent.targetYaw += (Math.random() - 0.5) * 0.8
       }
 
-      // 边界碰撞规避
+      // 边界规避（柔和转弯）
       if (swimAgent.pos.x < -boundX) {
-        swimAgent.targetYaw = 0.0 + (Math.random() - 0.5) * 0.4
+        swimAgent.targetYaw = 0.0 + (Math.random() - 0.5) * 0.3
       } else if (swimAgent.pos.x > boundX) {
-        swimAgent.targetYaw = Math.PI + (Math.random() - 0.5) * 0.4
+        swimAgent.targetYaw = Math.PI + (Math.random() - 0.5) * 0.3
       }
 
       if (swimAgent.pos.y < -boundY) {
-        swimAgent.targetPitch = 0.40
+        swimAgent.targetPitch = 0.35
       } else if (swimAgent.pos.y > boundY) {
-        swimAgent.targetPitch = -0.40
+        swimAgent.targetPitch = -0.35
       }
 
-      // 航向平滑转向
+      // 最短弧度平滑航向
+      swimAgent.yaw = smoothAngle(swimAgent.yaw, swimAgent.targetYaw, 0.5 * delta)
+      swimAgent.pitch += (swimAgent.targetPitch - swimAgent.pitch) * 0.5 * delta
+
       let dYaw = swimAgent.targetYaw - swimAgent.yaw
       dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
-      swimAgent.yaw += dYaw * Math.min(1.0, 0.7 * delta)
+      const targetRoll = -dYaw * 0.8
+      swimAgent.roll += (targetRoll - swimAgent.roll) * 0.05
 
-      let dPitch = swimAgent.targetPitch - swimAgent.pitch
-      swimAgent.pitch += dPitch * Math.min(1.0, 0.6 * delta)
-
-      const targetRoll = -dYaw * 1.2
-      swimAgent.roll += (targetRoll - swimAgent.roll) * 0.08
-
-      // 前向推进
-      const forwardSpeed = 1.1 * delta
+      // 前向巡游推进
+      const forwardSpeed = 0.95 * delta
       swimAgent.pos.x += Math.cos(swimAgent.yaw) * Math.cos(swimAgent.pitch) * forwardSpeed
       swimAgent.pos.y += Math.sin(swimAgent.pitch) * forwardSpeed
 
       const dZ = swimAgent.targetDepth - swimAgent.pos.z
-      swimAgent.pos.z += dZ * 0.02 + Math.sin(elapsed * 0.5) * 0.005
+      swimAgent.pos.z += dZ * 0.015 + Math.sin(elapsed * 0.4) * 0.004
     }
 
     // 更新 3D 姿态与位置
@@ -727,7 +734,7 @@ function startWhaleAnimation(): () => void {
       'ZYX'
     )
 
-    // 6. 颜色更新 (工作中极光青蓝，闲置深海幽蓝)
+    // 6. 颜色更新
     if (isDark) {
       const r = (0.72 - 0.50 * currentWorking) * D
       const g = (0.82 + 0.15 * currentWorking) * D
@@ -815,7 +822,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角缩小伴随、新建会话散开重组）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角小巧伴随、新建会话散开重组）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
