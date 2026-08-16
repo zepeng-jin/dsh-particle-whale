@@ -224,7 +224,6 @@ const VERTEX_SHADER = `
       float spineProg = clamp((targetCenter.x + 2.2) / 5.2, 0.0, 1.0);
       float tailFactor = spineProg * spineProg;
 
-      // 舒缓有力的流线型尾摆推力
       float swimFreq = mix(1.3, 2.6, uWorking);
       float wavePhase = uTime * swimFreq - targetCenter.x * 0.9;
 
@@ -312,37 +311,56 @@ const FRAGMENT_SHADER = `
   }
 `
 
-const STORAGE_KEY = 'dsh-particle-whale:enabled'
+const STORAGE_KEY = 'dsh-particle-whale:config'
 const LAYER_ID = 'dsh-particle-whale-layer'
-const STYLE_ID = 'dsh-particle-whale-glass-style'
+const STYLE_ID = 'dsh-particle-whale-custom-style'
+const POPUP_ID = 'dsh-particle-whale-quick-panel'
+const BTN_ID = 'dsh-particle-whale-rail-btn'
 const SETTINGS_NS = 'settings.particle-whale'
 
-let activeCleanup: (() => void) | null = null
-let triggerScatterAndAssembleFn: (() => void) | null = null
+interface UserWhaleConfig {
+  enabled: boolean
+  brightness: number      // 0.2 ~ 1.8, 默认 1.0
+  inputOpacity: number    // 0.2 ~ 1.0, 默认 0.88
+  speed: number           // 0.5 ~ 2.0, 默认 1.0
+  railWidth: number       // 38 ~ 56px, 默认 46px
+}
 
-function readEnabled(): boolean {
+const DEFAULT_CONFIG: UserWhaleConfig = {
+  enabled: true,
+  brightness: 1.0,
+  inputOpacity: 0.88,
+  speed: 1.0,
+  railWidth: 46
+}
+
+function loadConfig(): UserWhaleConfig {
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY)
-    if (value === null) return true
-    return value !== '0'
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return { ...DEFAULT_CONFIG }
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) }
   } catch {
-    return true
+    return { ...DEFAULT_CONFIG }
   }
 }
 
-function writeEnabled(enabled: boolean): void {
+function saveConfig(cfg: UserWhaleConfig): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, enabled ? '1' : '0')
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg))
   } catch {}
 }
+
+let activeCleanup: (() => void) | null = null
+let triggerScatterAndAssembleFn: (() => void) | null = null
+let currentConfig: UserWhaleConfig = loadConfig()
 
 function checkIsDarkTheme(): boolean {
   if (typeof document === 'undefined') return true
   return document.body.hasAttribute('data-ds-dark-theme')
 }
 
-/** 注入轻微磨砂半透明样式 */
-function injectGlassStyle() {
+/** 注入精致窄侧栏与自定义毛玻璃样式 */
+function injectCustomStyles(cfg: UserWhaleConfig) {
   let style = document.getElementById(STYLE_ID)
   if (!style) {
     style = document.createElement('style')
@@ -350,31 +368,63 @@ function injectGlassStyle() {
     document.head.appendChild(style)
   }
 
+  const rw = cfg.railWidth
+  const blurPx = Math.round(cfg.inputOpacity * 24)
+
   style.textContent = `
-    /* 深色模式：轻微磨砂半透明对话栏 (88% 不透明度) */
+    /* 1. 精致紧凑窄侧栏 (Narrow Rail) */
+    div[class*="AppFrame_root"] {
+      grid-template-columns: ${rw}px minmax(0, 1fr) !important;
+    }
+    div[class*="AppFrame_sidebar"] {
+      width: ${rw}px !important;
+      min-width: ${rw}px !important;
+      max-width: ${rw}px !important;
+    }
+    div[class*="SidebarRoot_root"][class*="collapsed"] {
+      width: ${rw}px !important;
+      padding: 12px 3px 6px !important;
+      box-sizing: border-box !important;
+    }
+    div[class*="SidebarRoot_root"][class*="collapsed"] button,
+    div[class*="SidebarRoot_root"][class*="collapsed"] a {
+      width: 32px !important;
+      height: 32px !important;
+      margin: 0 auto 6px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 8px !important;
+    }
+    div[class*="SidebarRoot_logoRow"] {
+      height: 48px !important;
+      padding: 4px 0 !important;
+      justify-content: center !important;
+    }
+
+    /* 2. 对话框自定义透明度 */
     body[data-ds-dark-theme] {
-      --dsw-specific-input-major: rgba(26, 28, 33, 0.88) !important;
+      --dsw-specific-input-major: rgba(26, 28, 33, ${cfg.inputOpacity}) !important;
     }
     body[data-ds-dark-theme] div[class*="InputBar_card"],
     body[data-ds-dark-theme] div[class*="card_"],
     body[data-ds-dark-theme] form[class*="card"] {
-      background: rgba(26, 28, 33, 0.88) !important;
-      backdrop-filter: blur(20px) saturate(140%) !important;
-      -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
+      background: rgba(26, 28, 33, ${cfg.inputOpacity}) !important;
+      backdrop-filter: blur(${blurPx}px) saturate(140%) !important;
+      -webkit-backdrop-filter: blur(${blurPx}px) saturate(140%) !important;
       border: 1px solid rgba(255, 255, 255, 0.08) !important;
       box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.30) !important;
     }
 
-    /* 白天模式：轻微磨砂半透明对话栏 */
     body:not([data-ds-dark-theme]) {
-      --dsw-specific-input-major: rgba(255, 255, 255, 0.88) !important;
+      --dsw-specific-input-major: rgba(255, 255, 255, ${cfg.inputOpacity}) !important;
     }
     body:not([data-ds-dark-theme]) div[class*="InputBar_card"],
     body:not([data-ds-dark-theme]) div[class*="card_"],
     body:not([data-ds-dark-theme]) form[class*="card"] {
-      background: rgba(255, 255, 255, 0.88) !important;
-      backdrop-filter: blur(20px) saturate(140%) !important;
-      -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
+      background: rgba(255, 255, 255, ${cfg.inputOpacity}) !important;
+      backdrop-filter: blur(${blurPx}px) saturate(140%) !important;
+      -webkit-backdrop-filter: blur(${blurPx}px) saturate(140%) !important;
       border: 1px solid rgba(0, 0, 0, 0.08) !important;
       box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05) !important;
     }
@@ -385,8 +435,214 @@ function injectGlassStyle() {
   `
 }
 
-function removeGlassStyle() {
+function removeCustomStyles() {
   document.getElementById(STYLE_ID)?.remove()
+}
+
+/** 注入侧边栏专属快捷控制入口 */
+function injectSidebarQuickButton(onTogglePanel: () => void) {
+  let existing = document.getElementById(BTN_ID)
+  if (existing) existing.remove()
+
+  const btn = document.createElement('button')
+  btn.id = BTN_ID
+  btn.type = 'button'
+  btn.title = '鲸鱼与透明度调节 (Whale & Glass Controls)'
+  btn.setAttribute('aria-label', '鲸鱼与透明度调节')
+  
+  Object.assign(btn.style, {
+    position: 'fixed',
+    left: '7px',
+    bottom: '54px',
+    width: '32px',
+    height: '32px',
+    zIndex: '9999',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'var(--dsw-alias-label-secondary, #94a3b8)',
+    transition: 'all 0.2s ease'
+  })
+
+  // 专属微型小鲸鱼 SVG 图标
+  btn.innerHTML = `
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12c1-4 4-7 9-7 6 0 10 3 11 6-2 1-3 3-5 3-3 0-4-2-7-2-3 0-5 2-8 0z"></path>
+      <circle cx="16" cy="9" r="1" fill="currentColor"></circle>
+      <path d="M7 16c2 1 4 1 6 0"></path>
+    </svg>
+  `
+
+  btn.onmouseenter = () => {
+    btn.style.background = 'var(--dsw-alias-bg-hover, rgba(255, 255, 255, 0.08))'
+    btn.style.color = '#4D6BFE'
+  }
+  btn.onmouseleave = () => {
+    btn.style.background = 'transparent'
+    btn.style.color = 'var(--dsw-alias-label-secondary, #94a3b8)'
+  }
+  btn.onclick = (e) => {
+    e.stopPropagation()
+    onTogglePanel()
+  }
+
+  document.body.appendChild(btn)
+}
+
+function removeSidebarQuickButton() {
+  document.getElementById(BTN_ID)?.remove()
+}
+
+/** 渲染侧栏弹出的毛玻璃快捷调节浮窗 (Liquid Glass Popover Panel) */
+function toggleQuickControlPanel(onConfigChange: (cfg: UserWhaleConfig) => void) {
+  let existing = document.getElementById(POPUP_ID)
+  if (existing) {
+    existing.remove()
+    return
+  }
+
+  const isDark = checkIsDarkTheme()
+  const panel = document.createElement('div')
+  panel.id = POPUP_ID
+  
+  Object.assign(panel.style, {
+    position: 'fixed',
+    left: '52px',
+    bottom: '48px',
+    width: '260px',
+    zIndex: '10000',
+    background: isDark ? 'rgba(28, 31, 38, 0.92)' : 'rgba(255, 255, 255, 0.94)',
+    backdropFilter: 'blur(24px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+    border: isDark ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(0, 0, 0, 0.10)',
+    borderRadius: '14px',
+    boxShadow: '0 16px 40px 0 rgba(0, 0, 0, 0.35)',
+    padding: '16px',
+    boxSizing: 'border-box',
+    color: isDark ? '#f1f5f9' : '#0f172a',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontSize: '13px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px',
+    animation: 'popover-in 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
+  })
+
+  panel.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}; padding-bottom: 10px;">
+      <div style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px;">
+        <span style="color: #4D6BFE;">🐳</span>
+        <span>鲸鱼与侧栏外观调节</span>
+      </div>
+      <button id="whale-cfg-close" style="background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 16px; padding: 0 4px;">✕</button>
+    </div>
+
+    <!-- 1. 鲸鱼总开关 -->
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <span style="font-size: 12px; color: ${isDark ? '#94a3b8' : '#64748b'};">3D 粒子鲸鱼</span>
+      <button id="whale-cfg-enabled" style="height: 24px; padding: 0 10px; border-radius: 12px; border: none; font-size: 12px; cursor: pointer; background: ${currentConfig.enabled ? '#4D6BFE' : (isDark ? '#334155' : '#cbd5e1')}; color: #fff;">
+        ${currentConfig.enabled ? '已开启' : '已关闭'}
+      </button>
+    </div>
+
+    <!-- 2. 鲸鱼亮度 -->
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">鲸鱼发光亮度</span>
+        <span id="val-brightness" style="color: #4D6BFE; font-weight: 600;">${Math.round(currentConfig.brightness * 100)}%</span>
+      </div>
+      <input id="slider-brightness" type="range" min="30" max="180" value="${Math.round(currentConfig.brightness * 100)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
+    </div>
+
+    <!-- 3. 对话框透明度 -->
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">对话输入框微透度</span>
+        <span id="val-input-opacity" style="color: #4D6BFE; font-weight: 600;">${Math.round(currentConfig.inputOpacity * 100)}%</span>
+      </div>
+      <input id="slider-input-opacity" type="range" min="30" max="100" value="${Math.round(currentConfig.inputOpacity * 100)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
+    </div>
+
+    <!-- 4. 侧栏宽度 -->
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">侧栏宽度 (窄边调节)</span>
+        <span id="val-rail-width" style="color: #4D6BFE; font-weight: 600;">${currentConfig.railWidth}px</span>
+      </div>
+      <input id="slider-rail-width" type="range" min="38" max="56" value="${currentConfig.railWidth}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
+    </div>
+
+    <!-- 5. 游动巡游速度 -->
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: ${isDark ? '#94a3b8' : '#64748b'};">游弋巡航速度</span>
+        <span id="val-speed" style="color: #4D6BFE; font-weight: 600;">${currentConfig.speed.toFixed(1)}x</span>
+      </div>
+      <input id="slider-speed" type="range" min="5" max="20" value="${Math.round(currentConfig.speed * 10)}" style="accent-color: #4D6BFE; cursor: pointer; width: 100%;" />
+    </div>
+  `
+
+  panel.onclick = (e) => e.stopPropagation()
+  document.body.appendChild(panel)
+
+  // 绑定事件
+  panel.querySelector('#whale-cfg-close')?.addEventListener('click', () => panel.remove())
+
+  const btnToggle = panel.querySelector('#whale-cfg-enabled') as HTMLButtonElement
+  btnToggle?.addEventListener('click', () => {
+    currentConfig.enabled = !currentConfig.enabled
+    btnToggle.textContent = currentConfig.enabled ? '已开启' : '已关闭'
+    btnToggle.style.background = currentConfig.enabled ? '#4D6BFE' : (isDark ? '#334155' : '#cbd5e1')
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
+  const sliderBright = panel.querySelector('#slider-brightness') as HTMLInputElement
+  sliderBright?.addEventListener('input', () => {
+    currentConfig.brightness = Number(sliderBright.value) / 100
+    panel.querySelector('#val-brightness')!.textContent = `${sliderBright.value}%`
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
+  const sliderOpacity = panel.querySelector('#slider-input-opacity') as HTMLInputElement
+  sliderOpacity?.addEventListener('input', () => {
+    currentConfig.inputOpacity = Number(sliderOpacity.value) / 100
+    panel.querySelector('#val-input-opacity')!.textContent = `${sliderOpacity.value}%`
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
+  const sliderRail = panel.querySelector('#slider-rail-width') as HTMLInputElement
+  sliderRail?.addEventListener('input', () => {
+    currentConfig.railWidth = Number(sliderRail.value)
+    panel.querySelector('#val-rail-width')!.textContent = `${sliderRail.value}px`
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
+  const sliderSpeed = panel.querySelector('#slider-speed') as HTMLInputElement
+  sliderSpeed?.addEventListener('input', () => {
+    currentConfig.speed = Number(sliderSpeed.value) / 10
+    panel.querySelector('#val-speed')!.textContent = `${currentConfig.speed.toFixed(1)}x`
+    saveConfig(currentConfig)
+    onConfigChange(currentConfig)
+  })
+
+  // 点击外部自动关闭
+  const onOutsideClick = (e: MouseEvent) => {
+    if (!panel.contains(e.target as Node) && e.target !== document.getElementById(BTN_ID)) {
+      panel.remove()
+      window.removeEventListener('click', onOutsideClick, true)
+    }
+  }
+  setTimeout(() => {
+    window.addEventListener('click', onOutsideClick, true)
+  }, 50)
 }
 
 /** 检测 Agent 工作状态 */
@@ -421,7 +677,7 @@ function startWhaleAnimation(): () => void {
   const gl = probe.getContext('webgl2') ?? probe.getContext('webgl')
   if (!gl) return () => {}
 
-  injectGlassStyle()
+  injectCustomStyles(currentConfig)
 
   let layer = document.getElementById(LAYER_ID)
   if (!layer) {
@@ -433,12 +689,12 @@ function startWhaleAnimation(): () => void {
       zIndex: '1000',
       pointerEvents: 'none',
       overflow: 'hidden',
-      opacity: '0.75'
+      opacity: `${0.75 * currentConfig.brightness}`
     })
     layer.setAttribute('aria-hidden', 'true')
     document.body.appendChild(layer)
   } else {
-    layer.style.opacity = '0.75'
+    layer.style.opacity = `${0.75 * currentConfig.brightness}`
   }
 
   const reducedMotion =
@@ -483,7 +739,7 @@ function startWhaleAnimation(): () => void {
       uLightPos: { value: new THREE.Vector3(DIGITILE_LIGHT_DEFAULTS.x, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z) },
       uLightRange: { value: DIGITILE_LIGHT_DEFAULTS.range },
       uShadeMin: { value: DIGITILE_LIGHT_DEFAULTS.shadeMin },
-      uShadeMax: { value: DIGITILE_LIGHT_DEFAULTS.shadeMax },
+      uShadeMax: { value: DIGITILE_LIGHT_DEFAULTS.shadeMax * currentConfig.brightness },
       uColor: { value: new THREE.Color(isDark ? 0.72 : 0.18, isDark ? 0.82 : 0.38, isDark ? 0.98 : 0.88) },
       uMouse: { value: new THREE.Vector2(999, 999) },
       uMouseRadius: { value: DIGITILE_MOUSE_DEFAULTS.radius },
@@ -633,7 +889,7 @@ function startWhaleAnimation(): () => void {
 
     const D = material.uniforms.uAssembly.value
 
-    // 2. 工作状态过渡
+    // 2. 工作状态平滑过渡
     const targetWorking = isAgentWorkingCached ? 1.0 : 0.0
     const lerpRate = targetWorking > currentWorking ? 0.05 : 0.03
     currentWorking += (targetWorking - currentWorking) * lerpRate
@@ -656,22 +912,20 @@ function startWhaleAnimation(): () => void {
       material.uniforms.uLightPos.value.set(lightX, DIGITILE_LIGHT_DEFAULTS.y, DIGITILE_LIGHT_DEFAULTS.z)
     }
 
-    // 5. 【动力学巡游计算】
+    // 5. 【动力学巡游计算】(结合用户设定的速度倍率)
+    const userSpeedMult = currentConfig.speed
     if (currentWorking > 0.01) {
-      // 运行中：在右上角专属水域（X: 5.5 ~ 7.5, Y: 2.3 ~ 3.4）内持续流畅进行「微流线巡弋畅游」
-      const cornerT = elapsed * 0.8
-      // 优美的平滑 8 字形/椭圆巡游轨迹 (Continuous Ocean Looping in Top-Right)
+      // 运行中：在右上角专属水域流畅进行微流线畅游
+      const cornerT = elapsed * 0.8 * userSpeedMult
       const cornerTargetX = 6.4 + Math.sin(cornerT) * 1.0
       const cornerTargetY = 2.85 + Math.sin(cornerT * 2.0) * 0.40
       const cornerTargetZ = Math.cos(cornerT) * 0.30
 
-      // 平滑朝向右上角游动点过渡
       const easeFactor = 0.06 * currentWorking
       swimAgent.pos.x += (cornerTargetX - swimAgent.pos.x) * easeFactor
       swimAgent.pos.y += (cornerTargetY - swimAgent.pos.y) * easeFactor
       swimAgent.pos.z += (cornerTargetZ - swimAgent.pos.z) * easeFactor
 
-      // 实时速度切线向量，驱动自然航向（持续前向畅游）
       const cornerVx = Math.cos(cornerT) * 1.0 * 0.8
       const cornerVy = 2.0 * Math.cos(cornerT * 2.0) * 0.40 * 0.8
       const targetYawCorner = Math.atan2(cornerVy, cornerVx)
@@ -679,13 +933,12 @@ function startWhaleAnimation(): () => void {
       swimAgent.yaw = smoothAngle(swimAgent.yaw, targetYawCorner, 0.06)
       swimAgent.pitch += (cornerVy * 0.4 - swimAgent.pitch) * 0.06
 
-      // 转向时的优雅侧倾
       let dYawCorner = targetYawCorner - swimAgent.yaw
       dYawCorner = Math.atan2(Math.sin(dYawCorner), Math.cos(dYawCorner))
       swimAgent.roll += (-dYawCorner * 0.6 - swimAgent.roll) * 0.06
 
     } else {
-      // 闲置状态：在全屏广阔大洋中自由前向巡游
+      // 闲置状态：全屏自由前向巡游
       const boundX = 8.5
       const boundY = 3.8
       const boundZ = 3.2
@@ -698,7 +951,6 @@ function startWhaleAnimation(): () => void {
         swimAgent.targetYaw += (Math.random() - 0.5) * 0.8
       }
 
-      // 边界规避（柔和转弯）
       if (swimAgent.pos.x < -boundX) {
         swimAgent.targetYaw = 0.0 + (Math.random() - 0.5) * 0.3
       } else if (swimAgent.pos.x > boundX) {
@@ -711,7 +963,6 @@ function startWhaleAnimation(): () => void {
         swimAgent.targetPitch = -0.35
       }
 
-      // 最短弧度平滑航向
       swimAgent.yaw = smoothAngle(swimAgent.yaw, swimAgent.targetYaw, 0.5 * delta)
       swimAgent.pitch += (swimAgent.targetPitch - swimAgent.pitch) * 0.5 * delta
 
@@ -720,8 +971,7 @@ function startWhaleAnimation(): () => void {
       const targetRoll = -dYaw * 0.8
       swimAgent.roll += (targetRoll - swimAgent.roll) * 0.05
 
-      // 前向巡游推进
-      const forwardSpeed = 0.95 * delta
+      const forwardSpeed = 0.95 * delta * userSpeedMult
       swimAgent.pos.x += Math.cos(swimAgent.yaw) * Math.cos(swimAgent.pitch) * forwardSpeed
       swimAgent.pos.y += Math.sin(swimAgent.pitch) * forwardSpeed
 
@@ -729,9 +979,7 @@ function startWhaleAnimation(): () => void {
       swimAgent.pos.z += dZ * 0.015 + Math.sin(elapsed * 0.4) * 0.004
     }
 
-    // 更新 3D 姿态与位置
     whaleGroup.position.copy(swimAgent.pos)
-
     whaleGroup.rotation.set(
       swimAgent.roll,
       -(swimAgent.yaw - Math.PI),
@@ -739,7 +987,7 @@ function startWhaleAnimation(): () => void {
       'ZYX'
     )
 
-    // 6. 颜色更新
+    // 6. 颜色与亮度
     if (isDark) {
       const r = (0.72 - 0.50 * currentWorking) * D
       const g = (0.82 + 0.15 * currentWorking) * D
@@ -797,7 +1045,9 @@ function startWhaleAnimation(): () => void {
     cancelAnimationFrame(raf)
     clearInterval(workingTimer)
     themeObserver.disconnect()
-    removeGlassStyle()
+    removeCustomStyles()
+    removeSidebarQuickButton()
+    document.getElementById(POPUP_ID)?.remove()
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('resize', onResize)
     window.removeEventListener('click', onNewChatClick, true)
@@ -827,7 +1077,7 @@ function stopWhaleAnimation(): void {
 // UI 语言包
 const zh = {
   title: '3D 粒子鲸鱼',
-  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角小巧游弋、新建会话散开重组）。',
+  hint: 'DeepSeek 官网同款 3D 粒子鲸鱼（闲置全屏巡游、思考时右上角小巧游弋、侧栏快捷调光）。',
   open: '开启',
   close: '关闭',
   statusOn: '已开启'
@@ -926,22 +1176,37 @@ export function apply(ctx: any) {
     bound?.sync(enabled, revision)
   }
 
-  const setWhaleEnabled = (enabled: boolean) => {
-    writeEnabled(enabled)
-    if (enabled) {
-      startWhaleAnimation()
+  const onApplyConfig = (cfg: UserWhaleConfig) => {
+    currentConfig = cfg
+    injectCustomStyles(cfg)
+    const layer = document.getElementById(LAYER_ID)
+    if (layer) {
+      layer.style.opacity = `${0.75 * cfg.brightness}`
+    }
+    if (cfg.enabled) {
+      if (!activeCleanup) startWhaleAnimation()
     } else {
       stopWhaleAnimation()
     }
-    sync(enabled)
+    sync(cfg.enabled)
   }
 
-  if (readEnabled()) {
+  // 始终挂载侧栏快捷控制入口（即使鲸鱼关闭也能在侧栏唤出面板一键打开）
+  injectCustomStyles(currentConfig)
+  injectSidebarQuickButton(() => {
+    toggleQuickControlPanel((cfg) => {
+      onApplyConfig(cfg)
+    })
+  })
+
+  if (currentConfig.enabled) {
     startWhaleAnimation()
   }
 
   ctx.effect(() => () => {
     stopWhaleAnimation()
+    removeSidebarQuickButton()
+    document.getElementById(POPUP_ID)?.remove()
   }, 'dsh-particle-whale: teardown')
 
   ctx.effect(() => ctx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-particle-whale: locale')
@@ -956,7 +1221,7 @@ export function apply(ctx: any) {
 
     const store = defineStore({
       init: () => ({
-        enabled: readEnabled(),
+        enabled: currentConfig.enabled,
         revision: -1
       }),
       actions: {
@@ -997,7 +1262,11 @@ export function apply(ctx: any) {
                 type: 'button',
                 style: enabled ? styles.btnClose : styles.btnOpen,
                 'aria-pressed': enabled,
-                onClick: () => setWhaleEnabled(!enabled),
+                onClick: () => {
+                  currentConfig.enabled = !enabled
+                  saveConfig(currentConfig)
+                  onApplyConfig(currentConfig)
+                },
                 children: enabled ? t('close') : t('open')
               })
             ]
@@ -1020,9 +1289,13 @@ export function apply(ctx: any) {
           locale: SETTINGS_NS,
           inject: (actions: any) => {
             bound = actions
-            sync(readEnabled())
+            sync(currentConfig.enabled)
             return {
-              setEnabled: setWhaleEnabled
+              setEnabled: (enabled: boolean) => {
+                currentConfig.enabled = enabled
+                saveConfig(currentConfig)
+                onApplyConfig(currentConfig)
+              }
             }
           }
         },
